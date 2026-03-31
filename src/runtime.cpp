@@ -487,6 +487,7 @@ struct Swapchain {
 static Instance g_instance{};
 static Session g_session{};
 static std::unordered_map<XrSwapchain, Swapchain> g_swapchains;
+uintptr_t g_nextSwapchainHandle = 1;
 
 // Head tracking state for mouse look and WASD movement
 static XrVector4f g_headPos = {0.0f, 0.0f, 0.0f, 1.7f};  // Start at standing eye height
@@ -1806,7 +1807,7 @@ static XrResult XRAPI_PTR xrCreateSwapchain_runtime(XrSession, const XrSwapchain
     Log("[SimXR] ============================================");
     if (!ci || !sc) return XR_ERROR_VALIDATION_FAILURE;
     rt::Swapchain chain{}; 
-    chain.handle = (XrSwapchain)(uintptr_t)(rt::g_swapchains.size() + 2);
+    chain.handle = (XrSwapchain)(rt::g_nextSwapchainHandle++);
     chain.format = (DXGI_FORMAT)ci->format;  // Store the original requested format
     chain.width = ci->width; 
     chain.height = ci->height; 
