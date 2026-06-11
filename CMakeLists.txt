@@ -24,6 +24,7 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 # OpenXR Simulator Runtime DLL
 add_library(openxr_wxr SHARED
     src/runtime.cpp
+    src/WinXrApiUDP.cpp
     src/mcp_integration.h
     src/ui_enhancements.h
 )
