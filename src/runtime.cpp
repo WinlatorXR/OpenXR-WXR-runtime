@@ -307,17 +307,9 @@ static XrVector3f prevRHandPos[5];
 static int lastPosFrame = 0;
 static int maxPosBuffer = 1;
 
-static float fovVarA = 1.0f;
-static float fovVarB = 0.0f;
-static float fovVarC = 1.0f;
-static float fovVarD = 0.0f;
-static float fovVarE = 104.5f;
-static float fovVarF = 104.5f;
-
 static float IPDVal;
 static float FOVH;
 static float FOVV;
-static float FOVTotal = 1.0472f;
 
 static bool LTrigger = false;
 static bool LGrip = false;
@@ -1453,7 +1445,7 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
 
     if (udpReader) {
         //Now we send the VR mode enable and target FOV of WinlatorXR at startup
-        udpReader->SendData("0 0 1 " + aerMode + " " + std::to_string(fovVarE) + " " + std::to_string(fovVarF));
+        udpReader->SendData("0 0 1 " + aerMode + " 0 0");
     }
 
     if (!createInfo || !instance) return XR_ERROR_VALIDATION_FAILURE;
@@ -2594,15 +2586,10 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     HMDQuat = makeXrVector4f(floats[18], floats[19], floats[20], floats[21]);
     HMDPos = makeXrVector3f(floats[22], floats[23], floats[24]);
 
+    float toRadians = 3.14159265f / 180.0f;
     IPDVal = floats[25];
-    FOVH = (floats[26] + 30.0f); // * 0.80f;
-    FOVV = (floats[27] - 20.0f); // * 0.80f;
-
-    //Alternate attempt at FOV manipulation
-    FOVH = (fovVarA * floats[26]) + fovVarB;
-    FOVV = (fovVarC * floats[27]) + fovVarD;
-
-    FOVTotal = FOVH / FOVV;
+    FOVH = floats[26] * toRadians;
+    FOVV = floats[27] * toRadians;
 
     LTrigger = buttonBools[7];
     LGrip = buttonBools[0];
@@ -4615,9 +4602,9 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
         // Safeguard: ensure fovDegrees is valid (default to 90 if not)
         //int fovDeg = ui::g_uiState.fovDegrees;
         //if (fovDeg <= 0 || fovDeg > 180) fovDeg = 90;
-        //float fovRadians = fovDeg * 0.5f * 3.14159265f / 180.0f;
-        float fovTan = tanf(FOVTotal / 2.0f); //fovRadians);
-        views[i].fov = { -fovTan, fovTan, fovTan, -fovTan };
+        float fovX = FOVH / 2.0f;
+        float fovY = FOVV / 2.0f;
+        views[i].fov = { -fovX, fovX, fovY, -fovY };
     }
     static int locateCount = 0;
     if (++locateCount % 90 == 1 && verboseLogging) {  // Log every 90 frames (~1 second)
@@ -5063,9 +5050,9 @@ static XrResult XRAPI_PTR xrGetViewConfigurationProperties_runtime(XrInstance, X
 static XrResult XRAPI_PTR xrApplyHapticFeedback_runtime(XrSession, const XrHapticActionInfo* info, const XrHapticBaseHeader* haptic) {
     if (udpReader) {
         if (sendHaptics) {
-            udpReader->SendData("1 1 1 " + aerMode + " " + std::to_string(fovVarE) + " " + std::to_string(fovVarF));
+            udpReader->SendData("1 1 1 " + aerMode + " 0 0");
         } else {
-            udpReader->SendData("0 0 1 " + aerMode + " " + std::to_string(fovVarE) + " " + std::to_string(fovVarF));
+            udpReader->SendData("0 0 1 " + aerMode + " 0 0");
         }
     }
 
@@ -5074,7 +5061,7 @@ static XrResult XRAPI_PTR xrApplyHapticFeedback_runtime(XrSession, const XrHapti
 
 static XrResult XRAPI_PTR xrStopHapticFeedback_runtime(XrSession, const XrHapticActionInfo* info) {
     if (udpReader) {
-        udpReader->SendData("0 0 1 " + aerMode + " " + std::to_string(fovVarE) + " " + std::to_string(fovVarF));
+        udpReader->SendData("0 0 1 " + aerMode + " 0 0");
     }
 
     return XR_SUCCESS;
