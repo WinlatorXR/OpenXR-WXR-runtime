@@ -1,4 +1,4 @@
-// MCP Integration - Screenshot capture and status reporting for OpenXR WXR
+// MCP Integration - Screenshot capture and status reporting for OpenXR Simulator
 #pragma once
 
 #include <windows.h>
@@ -17,7 +17,7 @@ using Microsoft::WRL::ComPtr;
 
 // MCP-specific logging
 inline void McpLog(const char* msg) {
-    OutputDebugStringA("[OxrWXR-MCP] ");
+    OutputDebugStringA("[SimXR-MCP] ");
     OutputDebugStringA(msg);
     OutputDebugStringA("\n");
 }
@@ -33,7 +33,7 @@ inline std::string GetSimulatorDataPath() {
     char base[MAX_PATH]{};
     DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", base, (DWORD)sizeof(base));
     if (len > 0 && len < sizeof(base)) {
-        return std::string(base) + "\\OxrWXR-Simulator";
+        return std::string(base) + "\\OpenXR-Simulator";
     }
     return ".";
 }

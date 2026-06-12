@@ -1,4 +1,4 @@
-// UI Enhancements for OpenXR WXR
+// UI Enhancements for OpenXR Simulator
 // Provides dark theme, menu system, and view controls
 #pragma once
 
@@ -169,7 +169,7 @@ inline HMENU CreateAppMenu() {
     // Help Menu
     HMENU helpMenu = CreatePopupMenu();
     AppendMenuW(helpMenu, MF_STRING, ID_HELP_CONTROLS, L"&Controls...\tF1");
-    AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About OpenXR WXR");
+    AppendMenuW(helpMenu, MF_STRING, ID_HELP_ABOUT, L"&About OpenXR Simulator");
     AppendMenuW(menuBar, MF_POPUP, (UINT_PTR)helpMenu, L"&Help");
 
     return menuBar;
@@ -217,7 +217,7 @@ inline void UpdateMenuState(HMENU menu) {
 // Show controls help dialog
 inline void ShowControlsDialog(HWND parent) {
     const wchar_t* helpText =
-        L"OpenXR WXR Controls\n"
+        L"OpenXR Simulator Controls\n"
         L"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         L"  Q/E - Up/Down\n\n"
         L"View Controls:\n"
@@ -244,7 +244,7 @@ inline void ShowControlsDialog(HWND parent) {
 // Show about dialog
 inline void ShowAboutDialog(HWND parent) {
     const wchar_t* aboutText =
-        L"OpenXR WXR\n"
+        L"OpenXR Simulator\n"
         L"Version 1.0\n\n"
         L"A Windows OpenXR runtime for WinlatorXR\n"
         L"Based upon OpenXR Simulator\n\n"
@@ -255,7 +255,7 @@ inline void ShowAboutDialog(HWND parent) {
         L"  Monocular and Stereo VR\n"
         L"  MCP integration for diagnostics";
 
-    MessageBoxW(parent, aboutText, L"About OpenXR WXR", MB_OK | MB_ICONINFORMATION);
+    MessageBoxW(parent, aboutText, L"About OpenXR Simulator", MB_OK | MB_ICONINFORMATION);
 }
 
 // Calculate the preview window size based on source size and zoom
@@ -532,9 +532,9 @@ inline void UpdateWindowTitle(HWND hwnd, int fps = 0, int frameCount = 0) {
     }
 
     if (fps > 0) {
-        swprintf_s(title, L"OpenXR WXR - %s - %s - %d FPS", viewModeStr, zoomStr, fps);
+        swprintf_s(title, L"OpenXR Simulator - %s - %s - %d FPS", viewModeStr, zoomStr, fps);
     } else {
-        swprintf_s(title, L"OpenXR WXR - %s - %s", viewModeStr, zoomStr);
+        swprintf_s(title, L"OpenXR Simulator - %s - %s", viewModeStr, zoomStr);
     }
 
     SetWindowTextW(hwnd, title);
