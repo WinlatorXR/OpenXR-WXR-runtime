@@ -153,18 +153,6 @@ inline UINT D3D12CalcSubresource(UINT MipSlice, UINT ArraySlice, UINT PlaneSlice
 // Simple logging (debug output + file log)
 static FILE* g_LogFile = nullptr;
 static void EnsureLogFile(bool append = true) {
-    /*if (g_LogFile) return;
-    char base[MAX_PATH]{};
-    DWORD len = GetEnvironmentVariableA("LOCALAPPDATA", base, (DWORD)sizeof(base));
-    char path[MAX_PATH]{};
-    if (len > 0 && len < sizeof(base)) {
-        snprintf(path, sizeof(path), "%s\\OpenXR-Simulator", base);
-        CreateDirectoryA(path, nullptr);
-        snprintf(path, sizeof(path), "%s\\OpenXR-Simulator\\openxr_wxr.log", base);
-    } else {
-        snprintf(path, sizeof(path), ".\\openxr_wxr.log");
-    }
-    fopen_s(&g_LogFile, path, "w");*/
     if (g_LogFile) return;
     std::filesystem::create_directories("D:\\oxrwxr\\logs");
     if (append) {
@@ -868,31 +856,15 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
                 if (rt::g_session.state == XR_SESSION_STATE_VISIBLE) {
                     rt::PushState(rt::g_session.handle, XR_SESSION_STATE_FOCUSED);
                 }
-                //rt::g_session.isFocused = false;
-                //if (verboseLogging) Log("[SimXR] WndProc: WM_ACTIVATE -> unfocused");
-                //rt::g_mouseCapture = false;  // Release mouse capture when window loses focus
-                //ReleaseCapture();
-                //// Push VISIBLE state if we were FOCUSED
-                //if (rt::g_session.state == XR_SESSION_STATE_FOCUSED) {
-                //    rt::PushState(rt::g_session.handle, XR_SESSION_STATE_VISIBLE);
-                //}
             }
             return 0;
         case WM_LBUTTONDOWN:
             if (verboseLogging) Logf("[SimXR] WM_LBUTTONDOWN: focused=%d", rt::g_session.isFocused.load());
-            if (rt::g_session.isFocused) {
-                /*rt::g_mouseCapture = true;
-                SetCapture(hWnd);
-                GetCursorPos(&rt::g_lastMousePos);
-                ShowCursor(FALSE);
-                Log("[SimXR] Mouse captured for look control");*/
-            }
             return 0;
         case WM_LBUTTONUP:
             if (rt::g_mouseCapture) {
                 rt::g_mouseCapture = false;
                 ReleaseCapture();
-                //ShowCursor(TRUE);
             }
             return 0;
         case WM_MOUSEMOVE:
@@ -927,7 +899,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_COMMAND:
             if (ui::HandleMenuCommand(hWnd, wParam,
                 []() { /* Resize handled by presentProjection based on zoom */ },
-                //[]() { mcp::g_screenshotRequested = true; },
                 []() { rt::g_headPos = {0, 1.7f, 0}; rt::g_headYaw = 0; rt::g_headPitch = 0; }
             )) {
                 return 0;
@@ -937,7 +908,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (!rt::g_mouseCapture) {
                 if (ui::HandleKeyboardShortcut(hWnd, wParam,
                     []() { /* Resize handled by presentProjection based on zoom */ },
-                    //[]() { mcp::g_screenshotRequested = true; },
                     []() { rt::g_headPos = {0, 1.7f, 0}; rt::g_headYaw = 0; rt::g_headPitch = 0; }
                 )) {
                     return 0;
@@ -945,9 +915,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             break;
         case WM_MOUSEWHEEL:
-            /*if (ui::HandleMouseWheel(hWnd, GET_WHEEL_DELTA_WPARAM(wParam), nullptr)) {
-                return 0;
-            }*/
             break;
         default:
             break;
@@ -974,16 +941,6 @@ static void ensurePreview(Session& s) {
         //----------------
         // Always assume focus
         s.isFocused = true;
-
-        //// Check if window has focus
-        //if (GetForegroundWindow() == s.hwnd) {
-        //    s.isFocused = true;
-        //    Log("[SimXR] Window created with focus");
-        //}
-        //else {
-        //    s.isFocused = false;
-        //    Log("[SimXR] Window created without focus");
-        //}
     }
 
     // Swapchain creation is now handled in ensurePreviewSized for both D3D11 and D3D12
@@ -2711,18 +2668,6 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
         rt::g_leftController.prevRoll = rt::g_leftController.rollOffset;
     }
 
-    // Check for MCP head pose commands (for automated testing)
-    /*mcp::HeadPoseCommand cmd = mcp::CheckHeadPoseCommand();
-    if (cmd.valid) {
-        rt::g_headPos.x = cmd.x;
-        rt::g_headPos.y = cmd.y;
-        rt::g_headPos.z = cmd.z;
-        rt::g_headYaw = cmd.yaw;
-        rt::g_headPitch = cmd.pitch;
-        mcp::WriteCommandAck("head_pose", true);
-    }*/
-    //}
-
     for (;;) {
         LARGE_INTEGER now; QueryPerformanceCounter(&now);
         double dt = (nextTick - (double)now.QuadPart) / (double)freq.QuadPart;
@@ -3556,35 +3501,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             if (leftTex != 0) flipImageVertically(leftPixels, width, height);
             if (rightTex != 0) flipImageVertically(rightPixels, width, height);
 
-            // MCP Integration - check for screenshot requests and capture (OpenGL path)
-            //mcp::CheckScreenshotRequest();
-            //if (mcp::g_screenshotRequested) {
-            //    if (mcp::g_screenshotLayer == "quad") {
-            //        // Capture only quad layer
-            //        mcp::CaptureQuadScreenshot();
-            //    }
-            //    else if (mcp::g_screenshotLayer == "all") {
-            //        // Capture both projection and quad layers
-            //        mcp::CaptureScreenshotGL(
-            //            leftTex != 0 ? leftPixels.data() : nullptr,
-            //            rightTex != 0 ? rightPixels.data() : nullptr,
-            //            width, height);
-            //        // Also capture quad layer separately
-            //        if (mcp::g_quadLayerCaptured) {
-            //            std::string quadPath = mcp::GetSimulatorDataPath() + "\\screenshot_quad.bmp";
-            //            mcp::SavePixelsToBMP(mcp::g_quadLayerPixels.data(),
-            //                mcp::g_quadLayerWidth, mcp::g_quadLayerHeight, quadPath.c_str());
-            //        }
-            //        mcp::g_screenshotRequested = false;
-            //    } else {
-            //        // Default: capture projection layer
-            //        mcp::CaptureScreenshotGL(
-            //            leftTex != 0 ? leftPixels.data() : nullptr,
-            //            rightTex != 0 ? rightPixels.data() : nullptr,
-            //            width, height);
-            //    }
-            //}
-
             // Restore original GL context
             if (savedRC) {
                 wglMakeCurrent(savedDC, savedRC);
@@ -4098,12 +4014,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                 ui::UpdateWindowTitle(s.hwnd, lastFPS, 0);
             }
 
-            // MCP Integration - check for screenshot requests and capture
-            /*mcp::CheckScreenshotRequest();
-            if (mcp::g_screenshotRequested) {
-                mcp::CaptureScreenshot(s.d3d11Device.Get(), s.d3d11Context.Get(), s.previewSwapchain.Get());
-            }*/
-
         } else {
             // ===== D3D12 PATH =====
             if (!s.previewSwapchain12) return;
@@ -4281,9 +4191,6 @@ static void renderQuadLayer(rt::Session& s, const XrCompositionLayerQuad* quad) 
             memcpy(topRow, bottomRow, rowSize);
             memcpy(bottomRow, tempRow.data(), rowSize);
         }
-
-        // Store quad layer pixels for MCP screenshot capture
-        //mcp::StoreQuadLayerPixels(pixels.data(), texWidth, texHeight);
 
         // Restore GL context
         if (savedRC) wglMakeCurrent(savedDC, savedRC);
@@ -4524,12 +4431,6 @@ static XrResult XRAPI_PTR xrEndFrame_runtime(XrSession, const XrFrameEndInfo* in
         Log("[SimXR] xrEndFrame: WARNING - No projection layers found!");
     }
 
-    //// MCP Integration - write frame status for diagnostics
-    //mcp::WriteFrameStatus(frameCount, rt::g_session.previewWidth, rt::g_session.previewHeight,
-    //                      "RGBA8", mcp::GetSessionStateName((int)rt::g_session.state),
-    //                      rt::g_headYaw, rt::g_headPitch,
-    //                      rt::g_headPos.x, rt::g_headPos.y, rt::g_headPos.z);
-
     return XR_SUCCESS;
 }
 
@@ -4598,11 +4499,7 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
             rt::g_headPos.z + rotatedOffset.z
         };
         
-        // Configurable FOV from UI settings
-        // Convert degrees to tangent: tan(fovDegrees/2 * PI/180)
-        // Safeguard: ensure fovDegrees is valid (default to 90 if not)
-        //int fovDeg = ui::g_uiState.fovDegrees;
-        //if (fovDeg <= 0 || fovDeg > 180) fovDeg = 90;
+        // FOV from API
         float fovX = FOVH / 2.0f;
         float fovY = FOVV / 2.0f;
         views[i].fov = { -fovX, fovX, fovY, -fovY };
@@ -4709,9 +4606,6 @@ static XrResult XRAPI_PTR xrEnumerateReferenceSpaces_runtime(XrSession, uint32_t
 }
 
 static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionSpaceCreateInfo* info, XrSpace* space) {
-    /*static int dummyHandler = 0xF000;
-    *space = (XrSpace)(dummyHandler++);*/
-
     if (!info || !space) return XR_ERROR_VALIDATION_FAILURE;
     static uintptr_t nextSpace = 200;
     *space = (XrSpace)(nextSpace++);
