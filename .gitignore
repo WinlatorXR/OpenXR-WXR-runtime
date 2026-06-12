@@ -53,8 +53,7 @@ bld/
 [Ll]ogs/
 
 # Compiled files
-*.dll
-*.exe
+oxrwxr/openxr_wxr.dll
 *.exp
 *.ilk
 *.lib

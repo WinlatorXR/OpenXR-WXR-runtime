@@ -5,16 +5,12 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Output directories
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/oxrwxr)
 
 # For multi-config generators (Visual Studio)
 foreach(OUTPUTCONFIG ${CMAKE_CONFIGURATION_TYPES})
     string(TOUPPER ${OUTPUTCONFIG} OUTPUTCONFIG)
-    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
-    set(CMAKE_LIBRARY_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
-    set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/bin)
+    set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_${OUTPUTCONFIG} ${CMAKE_SOURCE_DIR}/oxrwxr)
 endforeach()
 
 # Include directories
@@ -47,17 +43,3 @@ if(WIN32)
         _CRT_SECURE_NO_WARNINGS
     )
 endif()
-
-# Generate OpenXR runtime manifest
-set(RUNTIME_MANIFEST_CONTENT "{
-    \"file_format_version\": \"1.0.0\",
-    \"runtime\": {
-        \"library_path\": \"${CMAKE_SOURCE_DIR}/bin/openxr_wxr.dll\"
-    }
-}")
-
-file(WRITE ${CMAKE_SOURCE_DIR}/bin/openxr_wxr.json ${RUNTIME_MANIFEST_CONTENT})
-
-# Installation
-install(TARGETS openxr_wxr DESTINATION bin)
-install(FILES ${CMAKE_SOURCE_DIR}/bin/openxr_wxr.json DESTINATION bin)
