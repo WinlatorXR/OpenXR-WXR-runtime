@@ -347,6 +347,8 @@ static XrVector2f RThumbstick;
 
 static int OpenXRFrameID = 0;
 static int OpenXRFrameWait = 0;
+static int ViewportWidth = 1280;
+static int ViewportHeight = 720;
 
 static XrVector2f makeXrVector2f(float x, float y) {
     XrVector2f vec;
@@ -1260,11 +1262,8 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
             std::ofstream verFile(versionPath);
             if (verFile.is_open())
             {
-                verFile << "0.2";
+                verFile << "0.5";
                 verFile.close();
-            }
-            else
-            {
             }
         }
         catch (const std::exception& e)
@@ -1296,11 +1295,8 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
             std::ofstream verFile(fallbackVersion);
             if (verFile.is_open())
             {
-                verFile << "0.2";
+                verFile << "0.5";
                 verFile.close();
-            }
-            else
-            {
             }
         }
         catch (const std::exception& e)
@@ -1337,11 +1333,16 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
 
                 std::string hmdMakeStr;
                 std::string hmdModelStr;
+                std::string temp;
 
                 if (sysInfoFile.is_open()) {
                     std::getline(sysInfoFile, hmdMakeStr);
                     std::getline(sysInfoFile, hmdModelStr);
+                    std::getline(sysInfoFile, temp); //OS version
+                    std::getline(sysInfoFile, temp); //Security patch
+                    std::getline(sysInfoFile, temp); //Resolution
                     sysInfoFile.close();
+                    sscanf(temp.c_str(), "%dx%d", &ViewportWidth, &ViewportHeight);
                 }
 
                 hmdMake = hmdMakeStr;
@@ -1596,12 +1597,12 @@ static XrResult XRAPI_PTR xrEnumerateViewConfigurationViews_runtime(XrInstance, 
         for (uint32_t i = 0; i < 2; ++i) {
             views[i].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
             views[i].next = nullptr;
-            views[i].recommendedImageRectWidth = 1280;
-            views[i].recommendedImageRectHeight = 720;
+            views[i].recommendedImageRectWidth = ViewportWidth;
+            views[i].recommendedImageRectHeight = ViewportHeight;
             views[i].recommendedSwapchainSampleCount = 1;
             views[i].maxImageRectWidth = 4096; views[i].maxImageRectHeight = 4096; views[i].maxSwapchainSampleCount = 1;
         }
-        Log("[SimXR] xrEnumerateViewConfigurationViews: Returned 2 views (1280x720 recommended)");
+        Log("[SimXR] xrEnumerateViewConfigurationViews: Returned 2 views");
     }
     return XR_SUCCESS;
 }
