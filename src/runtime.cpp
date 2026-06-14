@@ -324,7 +324,7 @@ static bool R_ThumbLeft = false;
 static bool R_ThumbRight = false;
 static bool UpsideDownHandsFix = false;
 
-static XrVector3f HMDPos;
+static XrVector4f HMDPos;
 static XrVector3f LHandPos;
 static XrVector3f RHandPos;
 static XrVector4f HMDQuat;
@@ -501,7 +501,7 @@ static Session g_session{};
 static std::unordered_map<XrSwapchain, Swapchain> g_swapchains;
 
 // Head tracking state for mouse look and WASD movement
-static XrVector3f g_headPos = {0.0f, 1.7f, 0.0f};  // Start at standing eye height
+static XrVector4f g_headPos = {0.0f, 0.0f, 0.0f, 1.7f};  // Start at standing eye height
 static float g_headYaw = 0.0f;    // Rotation around Y axis (left/right)
 static float g_headPitch = 0.0f;  // Rotation around X axis (up/down)
 static float g_headRoll = 0.0f;  // Rotation around Z axis (roll)
@@ -899,7 +899,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         case WM_COMMAND:
             if (ui::HandleMenuCommand(hWnd, wParam,
                 []() { /* Resize handled by presentProjection based on zoom */ },
-                []() { rt::g_headPos = {0, 1.7f, 0}; rt::g_headYaw = 0; rt::g_headPitch = 0; }
+                []() { rt::g_headPos = {0, 0, 0, 1.7f}; rt::g_headYaw = 0; rt::g_headPitch = 0; rt::g_headRoll = 0; }
             )) {
                 return 0;
             }
@@ -908,7 +908,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             if (!rt::g_mouseCapture) {
                 if (ui::HandleKeyboardShortcut(hWnd, wParam,
                     []() { /* Resize handled by presentProjection based on zoom */ },
-                    []() { rt::g_headPos = {0, 1.7f, 0}; rt::g_headYaw = 0; rt::g_headPitch = 0; }
+                    []() { rt::g_headPos = {0, 0, 0, 1.7f}; rt::g_headYaw = 0; rt::g_headPitch = 0; rt::g_headRoll = 0; }
                 )) {
                     return 0;
                 }
@@ -2501,6 +2501,10 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     // Parse integer value and last string
     iss >> openXRFrameID >> buttonString; //>> hmdString;
 
+    // Parse float value on the end of the message
+    float altitude;
+    iss >> altitude;
+
     OpenXRFrameID = openXRFrameID;
 
     udpReader->LastOpenXRFrameID = OpenXRFrameID;
@@ -2542,7 +2546,7 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     RThumbstick = makeXrVector2f(floats[13], floats[14]);
 
     HMDQuat = makeXrVector4f(floats[18], floats[19], floats[20], floats[21]);
-    HMDPos = makeXrVector3f(floats[22], floats[23], floats[24]);
+    HMDPos = makeXrVector4f(floats[22], floats[23], floats[24], altitude);
 
     float toRadians = 3.14159265f / 180.0f;
     IPDVal = floats[25];
@@ -4495,9 +4499,10 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
         
         views[i].pose.position = {
             rt::g_headPos.x + rotatedOffset.x,
-            rt::g_headPos.y + rotatedOffset.y,
+            rt::g_headPos.y + rotatedOffset.y + (stageSpace ? rt::g_headPos.w : 0.0f),
             rt::g_headPos.z + rotatedOffset.z
         };
+        views[i].pose.orientation = orientation;
         
         // FOV from API
         float fovX = FOVH / 2.0f;
