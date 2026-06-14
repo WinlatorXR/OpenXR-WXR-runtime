@@ -294,6 +294,7 @@ static XrVector3f prevLHandPos[5];
 static XrVector3f prevRHandPos[5];
 static int lastPosFrame = 0;
 static int maxPosBuffer = 1;
+static float toRadians = 3.14159265f / 180.0f;
 
 static float IPDVal;
 static float FOVH;
@@ -548,7 +549,8 @@ static ControllerState g_rightController = {
     {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, {0.0f, 0.0f, 0.0f}, 0.0f, 0.0f, 0.0f  // Velocity tracking
 };
 
-// Map XrSpace handles to controller type (0=none, 1=left grip, 2=left aim, 3=right grip, 4=right aim)
+// Map XrSpace handles to controller type
+static std::unordered_map<XrSpace, bool> g_controllerGrip;
 static std::unordered_map<XrSpace, int> g_controllerSpaces;
 
 // Map XrPath to path string for controller detection
@@ -2123,7 +2125,7 @@ static XrResult XRAPI_PTR xrEnumerateSwapchainImages_runtime(XrSwapchain sc, uin
                 arr[i].image = it->second.imagesGL[i];
             }
             // DEBUG: Log the texture IDs being returned AND verify content still matches
-            Logf("[SimXR] xrEnumerateSwapchainImages(OpenGL): sc=%p texIDs=[%u,%u,%u]",
+            if (verboseLogging) Logf("[SimXR] xrEnumerateSwapchainImages(OpenGL): sc=%p texIDs=[%u,%u,%u]",
                  sc, n > 0 ? arr[0].image : 0, n > 1 ? arr[1].image : 0, n > 2 ? arr[2].image : 0);
 
             // DEBUG: Read first texture to verify it still has content
@@ -2143,7 +2145,7 @@ static XrResult XRAPI_PTR xrEnumerateSwapchainImages_runtime(XrSwapchain sc, uin
                 g_glDeleteFramebuffers(1, &checkFBO);
             }
         } else {
-            Logf("[SimXR] xrEnumerateSwapchainImages(OpenGL): sc=%p count=%u (query only)", sc, n);
+            if (verboseLogging) Logf("[SimXR] xrEnumerateSwapchainImages(OpenGL): sc=%p count=%u (query only)", sc, n);
         }
         return XR_SUCCESS;
     } else {
@@ -2153,7 +2155,7 @@ static XrResult XRAPI_PTR xrEnumerateSwapchainImages_runtime(XrSwapchain sc, uin
             auto* arr = reinterpret_cast<XrSwapchainImageD3D11KHR*>(images);
             for (uint32_t i = 0; i < n; ++i) { arr[i].type = XR_TYPE_SWAPCHAIN_IMAGE_D3D11_KHR; arr[i].texture = it->second.images[i].Get(); }
         }
-        Logf("[SimXR] xrEnumerateSwapchainImages(D3D11): sc=%p count=%u", sc, n);
+        if (verboseLogging) Logf("[SimXR] xrEnumerateSwapchainImages(D3D11): sc=%p count=%u", sc, n);
         return XR_SUCCESS;
     }
 }
@@ -2167,7 +2169,7 @@ static XrResult XRAPI_PTR xrAcquireSwapchainImage_runtime(XrSwapchain sc, const 
     if (index) *index = i; 
     
     static int acquireCount = 0;
-    if (++acquireCount % 60 == 1) {  // Log every 60 calls
+    if ((++acquireCount % 60 == 1) && verboseLogging) {  // Log every 60 calls
         Logf("[SimXR] xrAcquireSwapchainImage: sc=%p idx=%u (format=%d, %ux%u)", 
              sc, i, (int)ch.format, ch.width, ch.height);
     }
@@ -2548,7 +2550,6 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     HMDQuat = makeXrVector4f(floats[18], floats[19], floats[20], floats[21]);
     HMDPos = makeXrVector4f(floats[22], floats[23], floats[24], altitude);
 
-    float toRadians = 3.14159265f / 180.0f;
     IPDVal = floats[25];
     FOVH = floats[26] * toRadians;
     FOVV = floats[27] * toRadians;
@@ -4558,7 +4559,10 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
                                       XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
                                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
                                       XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-            rt::GetControllerPose(ctrl, &location->pose, (ctrlType != 1));
+            rt::GetControllerPose(ctrl, &location->pose, ctrlType != 1);
+            if (rt::g_referenceSpaceType[space] == XR_REFERENCE_SPACE_TYPE_STAGE) {
+                location->pose.position.y += HMDPos.w;
+            }
 
             // Handle velocity if chained (XrSpaceVelocity)
             XrSpaceVelocity* velocity = (XrSpaceVelocity*)location->next;
@@ -4616,9 +4620,10 @@ static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionS
     *space = (XrSpace)(nextSpace++);
 
     // Detect controller subaction paths and register the space
+    bool controllerGrip = false;
     int controllerType = 0;  // 0=none, 1=left, 2=right
     Logf("[SimXR] xrCreateActionSpace: subactionPath=%llu, g_pathStrings.size()=%zu",
-         (unsigned long long)info->subactionPath, rt::g_pathStrings.size());
+         (unsigned long long)info->subactionPath, rt::g_pathStrings.size() );
 
     if (info->subactionPath != XR_NULL_PATH) {
         auto it = rt::g_pathStrings.find(info->subactionPath);
@@ -4635,20 +4640,20 @@ static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionS
         } else {
             Logf("[SimXR] xrCreateActionSpace: path %llu NOT FOUND in g_pathStrings", (unsigned long long)info->subactionPath);
         }
+
+        if (strcmp(rt::g_actionNames[info->action].c_str(), "/user/hand/left/input/grip/pose") == 0) {
+            controllerGrip = true;
+        } else if (strcmp(rt::g_actionNames[info->action].c_str(), "/user/hand/right/input/grip/pose") == 0) {
+            controllerGrip = true;
+        }
     } else {
         Log("[SimXR] xrCreateActionSpace: subactionPath is XR_NULL_PATH");
     }
-
+ 
     if (controllerType > 0) {
         Logf("[SimXR] xrCreateActionSpace: space %llu controller type %d", (unsigned long long) * space, controllerType);
+        rt::g_controllerGrip[*space] = controllerGrip;
         rt::g_controllerSpaces[*space] = controllerType;
-
-        if (verboseLogging) {
-            Logf("rt::g_controllerSpaces contents:");
-            for (const auto& pair : rt::g_controllerSpaces) {
-                Logf("  Space: %p, Value: %p", pair.first, pair.second);
-            }
-        }
     }
     return XR_SUCCESS;
 }
@@ -4705,9 +4710,10 @@ static XrResult XRAPI_PTR xrDestroyAction_runtime(XrAction action) {
 static XrResult XRAPI_PTR xrSuggestInteractionProfileBindings_runtime(XrInstance, const XrInteractionProfileSuggestedBinding* bindings) {
     if (!bindings) return XR_ERROR_VALIDATION_FAILURE;
     // interactionProfile is an XrPath (integer), not a C-string
-    Logf("[SimXR] xrSuggestInteractionProfileBindings: profile=0x%llx",
-         (unsigned long long)bindings->interactionProfile);
-    return XR_SUCCESS;
+    bool valid = bindings->interactionProfile == 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
+    Logf("[SimXR] xrSuggestInteractionProfileBindings: profile=0x%llx, valid=%d",
+         (unsigned long long)bindings->interactionProfile, (int)valid);
+    return valid ? XR_SUCCESS : XR_ERROR_PATH_UNSUPPORTED;
 }
 
 static XrResult XRAPI_PTR xrAttachSessionActionSets_runtime(XrSession, const XrSessionActionSetsAttachInfo* info) {
@@ -4759,15 +4765,15 @@ static XrResult XRAPI_PTR xrGetActionStateBoolean_runtime(XrSession, const XrAct
     auto nameIt = rt::g_actionNames.find(info->action);
     if (nameIt != rt::g_actionNames.end()) {
         const std::string& name = nameIt->second;
-        if (ActionNameMatches(name, "trigger") || ActionNameMatches(name, "select") || ActionNameMatches(name, "fire")) {
+        if (ActionNameMatches(name, "trigger") || ActionNameMatches(name, "fire")) {
             buttonState = ctrl->triggerPressed;
         } else if (ActionNameMatches(name, "grip") || ActionNameMatches(name, "squeeze") || ActionNameMatches(name, "grab")) {
             buttonState = ctrl->gripPressed;
         } else if (ActionNameMatches(name, "menu")) {
             buttonState = ctrl->menuPressed;
-        } else if (ActionNameMatches(name, "primary") || ActionNameMatches(name, "a_button") || ActionNameMatches(name, "x_button")) {
+        } else if (ActionNameMatches(name, "primary") || ActionNameMatches(name, "/a/") || ActionNameMatches(name, "/x/")) {
             buttonState = ctrl->primaryPressed;
-        } else if (ActionNameMatches(name, "secondary") || ActionNameMatches(name, "b_button") || ActionNameMatches(name, "y_button")) {
+        } else if (ActionNameMatches(name, "secondary") || ActionNameMatches(name, "/b/") || ActionNameMatches(name, "/y/")) {
             buttonState = ctrl->secondaryPressed;
         } else if (ActionNameMatches(name, "thumbstick") || ActionNameMatches(name, "joystick")) {
             buttonState = ctrl->thumbstickPressed;
@@ -4872,7 +4878,7 @@ static XrResult XRAPI_PTR xrPathToString_runtime(XrInstance, XrPath path, uint32
 static XrResult XRAPI_PTR xrGetCurrentInteractionProfile_runtime(XrSession, XrPath topLevelUserPath, XrInteractionProfileState* interactionProfile) {
     if (!interactionProfile) return XR_ERROR_VALIDATION_FAILURE;
     interactionProfile->type = XR_TYPE_INTERACTION_PROFILE_STATE;
-    interactionProfile->interactionProfile = XR_NULL_PATH;
+    interactionProfile->interactionProfile = 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
     return XR_SUCCESS;
 }
 
