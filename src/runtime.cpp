@@ -333,6 +333,8 @@ static XrVector3f RHandPos;
 static XrVector4f HMDQuat;
 static XrVector4f LHandQuat;
 static XrVector4f RHandQuat;
+static XrVector4f LGHandQuat;
+static XrVector4f RGHandQuat;
 static XrVector2f LThumbstick;
 static XrVector2f RThumbstick;
 
@@ -612,26 +614,25 @@ static void AddController(XrSpace* space, XrActionSpaceCreateInfo* info) {
 }
 
 // Get controller world pose (combines head pose with controller offset)
-static void GetControllerPose(const ControllerState& ctrl, XrPosef* outPose, bool isRight, bool isGrip) {
+static void GetControllerPose(XrPosef* outPose, bool isRight, bool isGrip) {
     //----------------
     //OXRWXR CHANGE:
     //----------------
     // We get real position + rotation now
 
     if (isRight) {
-        outPose->orientation = { RHandQuat.x, RHandQuat.y, RHandQuat.z, RHandQuat.w };
+        if (isGrip)
+            outPose->orientation = { RGHandQuat.x, RGHandQuat.y, RGHandQuat.z, RGHandQuat.w };
+        else
+            outPose->orientation = { RHandQuat.x, RHandQuat.y, RHandQuat.z, RHandQuat.w };
         outPose->position = RHandPos;
     } else {
-        outPose->orientation = { LHandQuat.x, LHandQuat.y, LHandQuat.z, LHandQuat.w };
+        if (isGrip)
+            outPose->orientation = { LGHandQuat.x, LGHandQuat.y, LGHandQuat.z, LGHandQuat.w };
+        else
+            outPose->orientation = { LHandQuat.x, LHandQuat.y, LHandQuat.z, LHandQuat.w };
         outPose->position = LHandPos;
     }
-
-    /*if (ctrlGrip) {
-        XrQuaternionf quat = {};
-        XrVector3f axis = makeXrVector3f(1, 0, 0);
-        XrQuaternionf_CreateFromAxisAngle(&quat, &axis, 90.0f * toRadians);
-        XrQuaternionf_Multiply(&location->pose.orientation, &quat, &location->pose.orientation);
-    }*/
 }
 
 // Helper function to create quaternion from yaw and pitch
@@ -2552,9 +2553,11 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     // Parse integer value and last string
     iss >> openXRFrameID >> buttonString; //>> hmdString;
 
-    // Parse float value on the end of the message
-    float altitude;
-    iss >> altitude;
+    // Parse float values added in XrAPI v0.5
+    std::vector<float> v05floats(9);
+    for (auto& f : v05floats) {
+        iss >> f;
+    }
 
     OpenXRFrameID = openXRFrameID;
 
@@ -2588,16 +2591,18 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     //L_GRIP, L_MENU, L_THUMBSTICK_PRESS, L_THUMBSTICK_LEFT, L_THUMBSTICK_RIGHT, L_THUMBSTICK_UP, L_THUMBSTICK_DOWN, L_TRIGGER, L_X, L_Y,
     //R_A, R_B, R_GRIP, R_THUMBSTICK_PRESS, R_THUMBSTICK_LEFT, R_THUMBSTICK_RIGHT, R_THUMBSTICK_UP, R_THUMBSTICK_DOWN, R_TRIGGER
 
+    LGHandQuat = makeXrVector4f(v05floats[1], v05floats[2], v05floats[3], v05floats[4]);
     LHandQuat = makeXrVector4f(floats[0], floats[1], floats[2], floats[3]);
     LHandPos = makeXrVector3f(floats[6], floats[7], floats[8]);
     LThumbstick = makeXrVector2f(floats[4], floats[5]);
 
+    RGHandQuat = makeXrVector4f(v05floats[5], v05floats[6], v05floats[7], v05floats[8]);
     RHandQuat = makeXrVector4f(floats[9], floats[10], floats[11], floats[12]);
     RHandPos = makeXrVector3f(floats[15], floats[16], floats[17]);
     RThumbstick = makeXrVector2f(floats[13], floats[14]);
 
     HMDQuat = makeXrVector4f(floats[18], floats[19], floats[20], floats[21]);
-    HMDPos = makeXrVector4f(floats[22], floats[23], floats[24], altitude);
+    HMDPos = makeXrVector4f(floats[22], floats[23], floats[24], v05floats[0]);
 
     IPDVal = floats[25];
     FOVH = floats[26] * toRadians;
@@ -2682,8 +2687,8 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     // Calculate controller world positions
 
     XrPosef rightPose, leftPose;
-    rt::GetControllerPose(rt::g_rightController, &rightPose, true, false);
-    rt::GetControllerPose(rt::g_leftController, &leftPose, false, false);
+    rt::GetControllerPose(&rightPose, true, false);
+    rt::GetControllerPose(&leftPose, false, false);
 
     // Calculate linear velocity from position delta
     if (deltaTime > 0.0f) {
@@ -4609,7 +4614,7 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
                                       XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
                                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
                                       XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-            rt::GetControllerPose(ctrl, &location->pose, ctrlType != 1, ctrlGrip);
+            rt::GetControllerPose(&location->pose, ctrlType != 1, ctrlGrip);
             if (rt::g_referenceSpaceType[space] == XR_REFERENCE_SPACE_TYPE_STAGE) {
                 location->pose.position.y += HMDPos.w;
             }
