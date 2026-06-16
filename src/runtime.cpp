@@ -42,6 +42,7 @@
 #include <thread>
 #include <vector>
 #include <ws2tcpip.h>
+#include <xr_linear.h>
 #include <algorithm>
 // New defines
 #define D3DX12_COLOR_F(r, g, b, a) { (FLOAT)(r), (FLOAT)(g), (FLOAT)(b), (FLOAT)(a) }
@@ -551,7 +552,12 @@ static ControllerState g_rightController = {
 };
 
 // Map XrSpace handles to controller type
+static std::unordered_map<XrAction, XrPath> g_actionPaths;
+static std::unordered_map<XrSpace, bool> g_controllerGrips;
 static std::unordered_map<XrSpace, int> g_controllerSpaces;
+
+// Cache for controllers to be created
+static std::unordered_map<XrSpace, XrActionSpaceCreateInfo> g_controllerInfo;
 
 // Map XrPath to path string for controller detection
 static std::unordered_map<XrPath, std::string> g_pathStrings;
@@ -565,8 +571,48 @@ static std::unordered_map<XrAction, int> g_actionHand;
 // Time tracking for velocity calculation
 static XrTime g_lastFrameTime = 0;
 
+static void AddController(XrSpace* space, XrActionSpaceCreateInfo* info) {
+
+    // Detect controller subaction paths and register the space
+    bool controllerGrip = false;
+    int controllerType = 0;  // 0=none, 1=left, 2=right
+    if (info->action != XR_NULL_PATH) {
+        if (rt::g_actionPaths.find(info->action) != rt::g_actionPaths.end()) {
+            auto it = rt::g_pathStrings.find(rt::g_actionPaths[info->action]);
+            if (it != rt::g_pathStrings.end()) {
+                const std::string& pathStr = it->second;
+		if (pathStr.find("/grip/") != std::string::npos) {
+                    controllerGrip = true;
+                }
+            }
+            if (info->subactionPath != XR_NULL_PATH) {
+                it = rt::g_pathStrings.find(info->subactionPath);
+            }
+
+            if (it != rt::g_pathStrings.end()) {
+                const std::string& pathStr = it->second;
+                Logf("[SimXR] xrCreateActionSpace: found path='%s'", pathStr.c_str());
+                if (pathStr.find("/user/hand/left") != std::string::npos) {
+                    controllerType = 1;  // Left controller
+                } else if (pathStr.find("/user/hand/right") != std::string::npos) {
+                    controllerType = 2;  // Right controller
+                } else {
+                    Logf("[SimXR] AddController: No controller space for %s", it->second.c_str());
+                }
+            }
+        }
+    } else {
+        Log("[SimXR] AddController: subactionPath is XR_NULL_PATH");
+    }
+
+    if (controllerType > 0) {
+        rt::g_controllerGrips[*space] = controllerGrip;
+        rt::g_controllerSpaces[*space] = controllerType;
+    }
+}
+
 // Get controller world pose (combines head pose with controller offset)
-static void GetControllerPose(const ControllerState& ctrl, XrPosef* outPose, bool isRight) {
+static void GetControllerPose(const ControllerState& ctrl, XrPosef* outPose, bool isRight, bool isGrip) {
     //----------------
     //OXRWXR CHANGE:
     //----------------
@@ -579,6 +625,13 @@ static void GetControllerPose(const ControllerState& ctrl, XrPosef* outPose, boo
         outPose->orientation = { LHandQuat.x, LHandQuat.y, LHandQuat.z, LHandQuat.w };
         outPose->position = LHandPos;
     }
+
+    /*if (ctrlGrip) {
+        XrQuaternionf quat = {};
+        XrVector3f axis = makeXrVector3f(1, 0, 0);
+        XrQuaternionf_CreateFromAxisAngle(&quat, &axis, 90.0f * toRadians);
+        XrQuaternionf_Multiply(&location->pose.orientation, &quat, &location->pose.orientation);
+    }*/
 }
 
 // Helper function to create quaternion from yaw and pitch
@@ -2629,8 +2682,8 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
     // Calculate controller world positions
 
     XrPosef rightPose, leftPose;
-    rt::GetControllerPose(rt::g_rightController, &rightPose, true);
-    rt::GetControllerPose(rt::g_leftController, &leftPose, false);
+    rt::GetControllerPose(rt::g_rightController, &rightPose, true, false);
+    rt::GetControllerPose(rt::g_leftController, &leftPose, false, false);
 
     // Calculate linear velocity from position delta
     if (deltaTime > 0.0f) {
@@ -4522,8 +4575,14 @@ static XrResult XRAPI_PTR xrCreateReferenceSpace_runtime(XrSession, const XrRefe
 
 static XrResult XRAPI_PTR xrDestroySpace_runtime(XrSpace space) {
     Logf("[SimXR] xrDestroySpace: space=%p", space);
-    rt::g_referenceSpacePose.erase(space);
-    rt::g_referenceSpaceType.erase(space);
+    if (rt::g_referenceSpacePose.find(space) != rt::g_referenceSpacePose.end()) {
+        rt::g_referenceSpacePose.erase(space);
+        rt::g_referenceSpaceType.erase(space);
+    }
+    if (rt::g_controllerSpaces.find(space) != rt::g_controllerSpaces.end()) {
+        rt::g_controllerSpaces.erase(space);
+        rt::g_controllerGrips.erase(space);
+    }
     return XR_SUCCESS;
 }
 
@@ -4535,9 +4594,8 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
     // Check if this is a controller space
     auto it = rt::g_controllerSpaces.find(space);
     if (it != rt::g_controllerSpaces.end()) {
-        if (verboseLogging) Logf("[SimXR] xrLocateSpace: Found controller space");
-
         int ctrlType = it->second;
+        bool ctrlGrip = rt::g_controllerGrips[space];
         const rt::ControllerState& ctrl = (ctrlType == 1) ? rt::g_leftController : rt::g_rightController;
 
         //----------------
@@ -4547,13 +4605,11 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
         //if (ctrl.isTracking) {
 
         if (it->second > 0) {
-            if (verboseLogging) Logf("[SimXR] xrLocateSpace: it->second is > 0");
-
             location->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT |
                                       XR_SPACE_LOCATION_ORIENTATION_VALID_BIT |
                                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
                                       XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
-            rt::GetControllerPose(ctrl, &location->pose, ctrlType != 1);
+            rt::GetControllerPose(ctrl, &location->pose, ctrlType != 1, ctrlGrip);
             if (rt::g_referenceSpaceType[space] == XR_REFERENCE_SPACE_TYPE_STAGE) {
                 location->pose.position.y += HMDPos.w;
             }
@@ -4606,31 +4662,11 @@ static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionS
     static uintptr_t nextSpace = 200;
     *space = (XrSpace)(nextSpace++);
 
-    // Detect controller subaction paths and register the space
-    int controllerType = 0;  // 0=none, 1=left, 2=right
-    Logf("[SimXR] xrCreateActionSpace: subactionPath=%d, action=%d",  (unsigned long long)info->subactionPath, info->action );
+    rt::g_controllerInfo[*space] = XrActionSpaceCreateInfo();
+    memcpy(&rt::g_controllerInfo[*space], info, sizeof(XrActionSpaceCreateInfo));
 
-    if (info->subactionPath != XR_NULL_PATH) {
-        auto it = rt::g_pathStrings.find(info->subactionPath);
-        if (it != rt::g_pathStrings.end()) {
-            const std::string& pathStr = it->second;
-            Logf("[SimXR] xrCreateActionSpace: found path='%s'", pathStr.c_str());
-            if (pathStr.find("/user/hand/left") != std::string::npos) {
-                controllerType = 1;  // Left controller
-                Logf("[SimXR] xrCreateActionSpace: LEFT controller space %llu", (unsigned long long)*space);
-            } else if (pathStr.find("/user/hand/right") != std::string::npos) {
-                controllerType = 2;  // Right controller
-                Logf("[SimXR] xrCreateActionSpace: RIGHT controller space %llu", (unsigned long long)*space);
-            }
-        }
-    } else {
-        Log("[SimXR] xrCreateActionSpace: subactionPath is XR_NULL_PATH");
-    }
- 
-    if (controllerType > 0) {
-        Logf("[SimXR] xrCreateActionSpace: space %llu controller type %d", (unsigned long long) * space, controllerType);
-        rt::g_controllerSpaces[*space] = controllerType;
-    }
+    Logf("[SimXR] xrCreateActionSpace: space=%llu", (unsigned long long) * space);
+
     return XR_SUCCESS;
 }
 
@@ -4686,9 +4722,26 @@ static XrResult XRAPI_PTR xrDestroyAction_runtime(XrAction action) {
 
 static XrResult XRAPI_PTR xrSuggestInteractionProfileBindings_runtime(XrInstance, const XrInteractionProfileSuggestedBinding* bindings) {
     if (!bindings) return XR_ERROR_VALIDATION_FAILURE;
-    // interactionProfile is an XrPath (integer), not a C-string
-    Logf("[SimXR] xrSuggestInteractionProfileBindings: profile=0x%llx",
-         (unsigned long long)bindings->interactionProfile);
+
+    bool supported = bindings->interactionProfile == 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
+    if (!supported) {
+        return XR_ERROR_PATH_UNSUPPORTED;
+    }
+
+    for (int i = 0; i < bindings->countSuggestedBindings; i++) {
+        auto& binding = bindings->suggestedBindings[i];
+        if (rt::g_actionNames.find(binding.action) == rt::g_actionNames.end()) {
+            Logf("[SimXR] xrSuggestInteractionProfileBindings: unknown action %d", binding.action);
+            continue;
+        }
+        if (rt::g_pathStrings.find(binding.binding) == rt::g_pathStrings.end()) {
+            Logf("[SimXR] xrSuggestInteractionProfileBindings: unknown binding %d", binding.binding);
+            continue;
+        }
+        Logf("[SimXR] xrSuggestInteractionProfileBindings: action=%s, binding=%s",
+             rt::g_actionNames[binding.action].c_str(), rt::g_pathStrings[binding.binding].c_str());
+        rt::g_actionPaths[binding.action] = binding.binding;
+    }
     return XR_SUCCESS;
 }
 
@@ -4823,6 +4876,16 @@ static XrResult XRAPI_PTR xrGetActionStateVector2f_runtime(XrSession, const XrAc
 
 static XrResult XRAPI_PTR xrSyncActions_runtime(XrSession, const XrActionsSyncInfo* info) {
     if (!info) return XR_ERROR_VALIDATION_FAILURE;
+
+    if (rt::g_controllerInfo.size()) {
+        for (auto it = rt::g_controllerInfo.begin(); it != rt::g_controllerInfo.end(); ++it) {
+            XrSpace space = it->first;
+            XrActionSpaceCreateInfo& info = it->second;
+            rt::AddController(&space, &info);
+        }
+        rt::g_controllerInfo.clear();
+    }
+
     return XR_SUCCESS;
 }
 
