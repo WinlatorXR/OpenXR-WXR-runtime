@@ -4502,7 +4502,7 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
     //OXRWXR CHANGE:
     //----------------
     //Now we have the real quat
-    XrQuaternionf orientation = { HMDQuat.x, HMDQuat.y, HMDQuat.z, HMDQuat.w }; //rt::QuatFromYawPitchRoll(rt::g_headYaw, rt::g_headPitch, rt::g_headRoll);
+    XrQuaternionf orientation = { HMDQuat.x, HMDQuat.y, HMDQuat.z, HMDQuat.w };
 
     // Helper function to rotate a vector by a quaternion
     auto rotateVector = [](XrQuaternionf q, XrVector3f v) -> XrVector3f {
@@ -4595,6 +4595,8 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
     if (!location) return XR_ERROR_VALIDATION_FAILURE;
     location->type = XR_TYPE_SPACE_LOCATION;
 
+    bool stageSpace = rt::g_referenceSpaceType[baseSpace] == XR_REFERENCE_SPACE_TYPE_STAGE;
+
     if (verboseLogging) Logf("[SimXR] xrLocateSpace: Looking for space=%d in baseSpace=%d", (uint64_t)space, (uint64_t)baseSpace);
     // Check if this is a controller space
     auto it = rt::g_controllerSpaces.find(space);
@@ -4615,7 +4617,7 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
                                       XR_SPACE_LOCATION_POSITION_TRACKED_BIT |
                                       XR_SPACE_LOCATION_ORIENTATION_TRACKED_BIT;
             rt::GetControllerPose(&location->pose, ctrlType != 1, ctrlGrip);
-            if (rt::g_referenceSpaceType[space] == XR_REFERENCE_SPACE_TYPE_STAGE) {
+            if (stageSpace) {
                 location->pose.position.y += HMDPos.w;
             }
 
@@ -4638,16 +4640,20 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
                      ctrl.linearVelocity.x, ctrl.linearVelocity.y, ctrl.linearVelocity.z, speed);
             }
         } else {
-            if (verboseLogging) Logf("[SimXR] xrLocateSpace: it->second is <= 0");
+            // Default for invalid data
             location->locationFlags = 0;
             location->pose.orientation = {0, 0, 0, 1};
             location->pose.position = {0, 0, 0};
         }
     } else {
-        // Default for non-controller spaces (identity pose)
+        // Head pose for non-controller spaces
         location->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
-        location->pose.orientation = {0, 0, 0, 1};
-        location->pose.position = {0, 0, 0};
+        location->pose.orientation = { HMDQuat.x, HMDQuat.y, HMDQuat.z, HMDQuat.w };
+        location->pose.position = {
+            rt::g_headPos.x,
+            rt::g_headPos.y + (stageSpace ? rt::g_headPos.w : 0.0f),
+            rt::g_headPos.z
+        };
     }
     return XR_SUCCESS;
 }
@@ -4728,11 +4734,6 @@ static XrResult XRAPI_PTR xrDestroyAction_runtime(XrAction action) {
 static XrResult XRAPI_PTR xrSuggestInteractionProfileBindings_runtime(XrInstance, const XrInteractionProfileSuggestedBinding* bindings) {
     if (!bindings) return XR_ERROR_VALIDATION_FAILURE;
 
-    bool supported = bindings->interactionProfile == 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
-    if (!supported) {
-        return XR_ERROR_PATH_UNSUPPORTED;
-    }
-
     for (int i = 0; i < bindings->countSuggestedBindings; i++) {
         auto& binding = bindings->suggestedBindings[i];
         if (rt::g_actionNames.find(binding.action) == rt::g_actionNames.end()) {
@@ -4747,7 +4748,9 @@ static XrResult XRAPI_PTR xrSuggestInteractionProfileBindings_runtime(XrInstance
              rt::g_actionNames[binding.action].c_str(), rt::g_pathStrings[binding.binding].c_str());
         rt::g_actionPaths[binding.action] = binding.binding;
     }
-    return XR_SUCCESS;
+
+    bool supported = bindings->interactionProfile == 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
+    return supported ? XR_SUCCESS : XR_ERROR_PATH_UNSUPPORTED;
 }
 
 static XrResult XRAPI_PTR xrAttachSessionActionSets_runtime(XrSession, const XrSessionActionSetsAttachInfo* info) {
@@ -4798,7 +4801,12 @@ static XrResult XRAPI_PTR xrGetActionStateBoolean_runtime(XrSession, const XrAct
     bool buttonState = false;
     auto nameIt = rt::g_actionNames.find(info->action);
     if (nameIt != rt::g_actionNames.end()) {
-        const std::string& name = nameIt->second;
+        std::string name = nameIt->second;
+        if (auto actionIt = rt::g_actionPaths.find(info->action); actionIt != rt::g_actionPaths.end()) {
+            if (auto pathIt = rt::g_pathStrings.find(actionIt->second); pathIt != rt::g_pathStrings.end()) {
+                name = pathIt->second;
+            }
+        }
         if (ActionNameMatches(name, "trigger") || ActionNameMatches(name, "fire")) {
             buttonState = ctrl->triggerPressed;
         } else if (ActionNameMatches(name, "grip") || ActionNameMatches(name, "squeeze") || ActionNameMatches(name, "grab")) {
@@ -4832,11 +4840,20 @@ static XrResult XRAPI_PTR xrGetActionStateFloat_runtime(XrSession, const XrActio
     float floatState = 0.0f;
     auto nameIt = rt::g_actionNames.find(info->action);
     if (nameIt != rt::g_actionNames.end()) {
-        const std::string& name = nameIt->second;
+        std::string name = nameIt->second;
+        if (auto actionIt = rt::g_actionPaths.find(info->action); actionIt != rt::g_actionPaths.end()) {
+            if (auto pathIt = rt::g_pathStrings.find(actionIt->second); pathIt != rt::g_pathStrings.end()) {
+                name = pathIt->second;
+            }
+        }
         if (ActionNameMatches(name, "trigger") || ActionNameMatches(name, "select") || ActionNameMatches(name, "fire")) {
             floatState = ctrl->triggerValue;
         } else if (ActionNameMatches(name, "grip") || ActionNameMatches(name, "squeeze") || ActionNameMatches(name, "grab")) {
             floatState = ctrl->gripValue;
+        } else if (ActionNameMatches(name, "thumbstick/x")) {
+            floatState = ctrl->thumbstick.x;
+        } else if (ActionNameMatches(name, "thumbstick/y")) {
+            floatState = ctrl->thumbstick.y;
         }
     }
 
@@ -4858,23 +4875,9 @@ static XrResult XRAPI_PTR xrGetActionStateVector2f_runtime(XrSession, const XrAc
     state->changedSinceLastSync = XR_FALSE;
     state->lastChangeTime = 0;
 
-    // Get controller for this action
+    // Get controller state for this action
     rt::ControllerState* ctrl = GetControllerForAction(info->action, info->subactionPath);
-
-    // Get action name to determine input type
-    auto nameIt = rt::g_actionNames.find(info->action);
-    if (nameIt != rt::g_actionNames.end()) {
-        const std::string& name = nameIt->second;
-        if (ActionNameMatches(name, "thumbstick") || ActionNameMatches(name, "joystick") ||
-            ActionNameMatches(name, "move") || ActionNameMatches(name, "turn")) {
-            state->currentState = ctrl->thumbstick;
-        } else {
-            state->currentState = {0.0f, 0.0f};
-        }
-    } else {
-        state->currentState = {0.0f, 0.0f};
-    }
-
+    state->currentState = ctrl->thumbstick;
     state->isActive = XR_TRUE;
     return XR_SUCCESS;
 }
