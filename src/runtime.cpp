@@ -35,6 +35,7 @@
 #include <io.h>
 #include <iostream>
 #include <locale>
+#include <map>
 #include <mutex>
 #include <sstream>
 #include <string>
@@ -418,9 +419,9 @@ static bool g_adapterLuidSet = false;
 static HWND g_persistentWindow = nullptr;
 static std::mutex g_windowMutex;
 static ComPtr<IDXGISwapChain1> g_persistentSwapchain;
-static UINT g_persistentWidth = 1920;
-static UINT g_persistentHeight = 540;
 static bool g_windowClassRegistered = false;
+static std::map<XrSpace, XrPosef> g_referenceSpacePose;
+static std::map<XrSpace, XrReferenceSpaceType> g_referenceSpaceType;
 
 struct Instance {
     XrInstance handle{(XrInstance)1};
@@ -473,8 +474,8 @@ struct Session {
     HWND hwnd{nullptr};
     std::atomic<bool> isFocused{false};
     ComPtr<IDXGISwapChain1> previewSwapchain;
-    UINT previewWidth{1920};
-    UINT previewHeight{540};
+    UINT previewWidth{(UINT)ViewportWidth};
+    UINT previewHeight{(UINT)ViewportHeight};
     DXGI_FORMAT previewFormat{DXGI_FORMAT_UNKNOWN};  // Track format for matching
     std::mutex previewMutex;
 };
@@ -550,7 +551,6 @@ static ControllerState g_rightController = {
 };
 
 // Map XrSpace handles to controller type
-static std::unordered_map<XrSpace, bool> g_controllerGrip;
 static std::unordered_map<XrSpace, int> g_controllerSpaces;
 
 // Map XrPath to path string for controller detection
@@ -1550,7 +1550,7 @@ static XrResult XRAPI_PTR xrEnumerateViewConfigurations_runtime(XrInstance, XrSy
 }
 
 static XrResult XRAPI_PTR xrEnumerateViewConfigurationViews_runtime(XrInstance, XrSystemId, XrViewConfigurationType viewType, uint32_t capacity, uint32_t* count, XrViewConfigurationView* views) {
-    Logf("[SimXR] xrEnumerateViewConfigurationViews called: viewType=%d, capacity=%u", (int)viewType, capacity);
+    if (verboseLogging) Logf("[SimXR] xrEnumerateViewConfigurationViews called: viewType=%d, capacity=%u", (int)viewType, capacity);
     if (count) *count = 2;
     if (capacity >= 2 && views) {
         for (uint32_t i = 0; i < 2; ++i) {
@@ -1561,7 +1561,7 @@ static XrResult XRAPI_PTR xrEnumerateViewConfigurationViews_runtime(XrInstance, 
             views[i].recommendedSwapchainSampleCount = 1;
             views[i].maxImageRectWidth = 4096; views[i].maxImageRectHeight = 4096; views[i].maxSwapchainSampleCount = 1;
         }
-        Log("[SimXR] xrEnumerateViewConfigurationViews: Returned 2 views");
+        if (verboseLogging) Log("[SimXR] xrEnumerateViewConfigurationViews: Returned 2 views");
     }
     return XR_SUCCESS;
 }
@@ -1596,8 +1596,8 @@ static XrResult XRAPI_PTR xrCreateSession_runtime(XrInstance instance, const XrS
         rt::g_session.d3d12Device.Reset();
         rt::g_session.d3d12Queue.Reset();
         rt::ResetD3D12PreviewResources(rt::g_session);
-        rt::g_session.previewWidth = 1920;
-        rt::g_session.previewHeight = 540;
+        rt::g_session.previewWidth = ViewportWidth;
+        rt::g_session.previewHeight = ViewportHeight;
         rt::g_session.isFocused = false;
     }
     // Accept D3D11 and D3D12
@@ -1687,14 +1687,10 @@ static XrResult XRAPI_PTR xrDestroySession_runtime(XrSession s) {
         if (rt::g_session.hwnd && !rt::g_persistentWindow) {
             rt::g_persistentWindow = rt::g_session.hwnd;
             rt::g_persistentSwapchain = rt::g_session.previewSwapchain;
-            rt::g_persistentWidth = rt::g_session.previewWidth;
-            rt::g_persistentHeight = rt::g_session.previewHeight;
             Log("[SimXR] xrDestroySession: Preserving window and swapchain for next session");
         } else if (rt::g_session.hwnd == rt::g_persistentWindow) {
             // Already using persistent window, just update the swapchain
             rt::g_persistentSwapchain = rt::g_session.previewSwapchain;
-            rt::g_persistentWidth = rt::g_session.previewWidth;
-            rt::g_persistentHeight = rt::g_session.previewHeight;
             Log("[SimXR] xrDestroySession: Updating persistent swapchain");
         }
     }
@@ -1713,8 +1709,8 @@ static XrResult XRAPI_PTR xrDestroySession_runtime(XrSession s) {
     rt::g_session.glDC = nullptr;
     rt::g_session.glRC = nullptr;
     rt::g_session.hwnd = nullptr;  // Clear from session but window still exists
-    rt::g_session.previewWidth = 1920;
-    rt::g_session.previewHeight = 540;
+    rt::g_session.previewWidth = ViewportWidth;
+    rt::g_session.previewHeight = ViewportHeight;
     rt::g_session.isFocused = false;
     Log("[SimXR] xrDestroySession: SUCCESS");
     return XR_SUCCESS;
@@ -2736,11 +2732,11 @@ static void ensurePreviewSized(rt::Session& s, UINT width, UINT height, DXGI_FOR
                 Log("[SimXR] Updated window WndProc to new DLL address");
 
                 // Reuse swapchain if compatible
-                if (rt::g_persistentSwapchain && rt::g_persistentWidth == width && 
-                    rt::g_persistentHeight == height && s.previewFormat == format) {
+                if (rt::g_persistentSwapchain && ViewportWidth == width && 
+                    ViewportHeight == height && s.previewFormat == format) {
                     s.previewSwapchain = rt::g_persistentSwapchain;
-                    s.previewWidth = rt::g_persistentWidth;
-                    s.previewHeight = rt::g_persistentHeight;
+                    s.previewWidth = ViewportWidth;
+                    s.previewHeight = ViewportHeight;
                     s.previewFormat = format;
                     Log("[SimXR] Reusing existing window AND swapchain from previous session");
                     return;  // Everything is already set up
@@ -3077,14 +3073,6 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
         box.back = 1;
         
         s.d3d11Context->CopySubresourceRegion(viewTexture.Get(), 0, 0, 0, 0, sourceTexture.Get(), srcSubresource, &box);
-        
-        if (rectClamped) {
-            Logf("[SimXR] Applied clamped imageRect: %dx%d from (%d,%d)",
-                 rectW, rectH, rectX, rectY);
-        } else {
-            Logf("[SimXR] Applied imageRect cropping: %dx%d from (%d,%d)",
-                 rectW, rectH, rectX, rectY);
-        }
     } else {
         // Copy full texture or handle MSAA
         if (srcDesc.SampleDesc.Count > 1) {
@@ -4483,6 +4471,8 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
         return XrVector3f{ result.x, result.y, result.z };
     };
 
+    bool stageSpace = rt::g_referenceSpaceType[li->space] == XR_REFERENCE_SPACE_TYPE_STAGE;
+
     for (uint32_t i = 0; i < 2; ++i) {
         views[i].type = XR_TYPE_VIEW;
         views[i].pose.orientation = orientation;
@@ -4524,12 +4514,16 @@ static XrResult XRAPI_PTR xrCreateReferenceSpace_runtime(XrSession, const XrRefe
     if (!info || !space) return XR_ERROR_VALIDATION_FAILURE;
     static uintptr_t nextSpace = 100;
     *space = (XrSpace)(nextSpace++);
-    Logf("[SimXR] xrCreateReferenceSpace: type=%d space=%p", info->referenceSpaceType, *space);
+    rt::g_referenceSpacePose[*space] = info->poseInReferenceSpace;
+    rt::g_referenceSpaceType[*space] = info->referenceSpaceType;
+    Logf("[SimXR] xrCreateReferenceSpace: type=%d space=%d", info->referenceSpaceType, *space);
     return XR_SUCCESS;
 }
 
 static XrResult XRAPI_PTR xrDestroySpace_runtime(XrSpace space) {
     Logf("[SimXR] xrDestroySpace: space=%p", space);
+    rt::g_referenceSpacePose.erase(space);
+    rt::g_referenceSpaceType.erase(space);
     return XR_SUCCESS;
 }
 
@@ -4537,7 +4531,7 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
     if (!location) return XR_ERROR_VALIDATION_FAILURE;
     location->type = XR_TYPE_SPACE_LOCATION;
 
-    if (verboseLogging) Logf("Looking for space:0x%llX", (uint64_t)space);
+    if (verboseLogging) Logf("[SimXR] xrLocateSpace: Looking for space=%d in baseSpace=%d", (uint64_t)space, (uint64_t)baseSpace);
     // Check if this is a controller space
     auto it = rt::g_controllerSpaces.find(space);
     if (it != rt::g_controllerSpaces.end()) {
@@ -4590,13 +4584,6 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
         }
     } else {
         // Default for non-controller spaces (identity pose)
-        if (verboseLogging) {
-            Logf("[SimXR] xrLocateSpace: it == rt::g_controllerSpaces.end()");
-            Logf("rt::g_controllerSpaces contents:");
-            for (const auto& pair : rt::g_controllerSpaces) {
-                Logf("  Space: %p, Value: %p", pair.first, pair.second);
-            }
-        }
         location->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
         location->pose.orientation = {0, 0, 0, 1};
         location->pose.position = {0, 0, 0};
@@ -4615,15 +4602,13 @@ static XrResult XRAPI_PTR xrEnumerateReferenceSpaces_runtime(XrSession, uint32_t
 }
 
 static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionSpaceCreateInfo* info, XrSpace* space) {
-    if (!info || !space) return XR_ERROR_VALIDATION_FAILURE;
+    if (!info) return XR_ERROR_VALIDATION_FAILURE;
     static uintptr_t nextSpace = 200;
     *space = (XrSpace)(nextSpace++);
 
     // Detect controller subaction paths and register the space
-    bool controllerGrip = false;
     int controllerType = 0;  // 0=none, 1=left, 2=right
-    Logf("[SimXR] xrCreateActionSpace: subactionPath=%llu, g_pathStrings.size()=%zu",
-         (unsigned long long)info->subactionPath, rt::g_pathStrings.size() );
+    Logf("[SimXR] xrCreateActionSpace: subactionPath=%d, action=%d",  (unsigned long long)info->subactionPath, info->action );
 
     if (info->subactionPath != XR_NULL_PATH) {
         auto it = rt::g_pathStrings.find(info->subactionPath);
@@ -4637,14 +4622,6 @@ static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionS
                 controllerType = 2;  // Right controller
                 Logf("[SimXR] xrCreateActionSpace: RIGHT controller space %llu", (unsigned long long)*space);
             }
-        } else {
-            Logf("[SimXR] xrCreateActionSpace: path %llu NOT FOUND in g_pathStrings", (unsigned long long)info->subactionPath);
-        }
-
-        if (strcmp(rt::g_actionNames[info->action].c_str(), "/user/hand/left/input/grip/pose") == 0) {
-            controllerGrip = true;
-        } else if (strcmp(rt::g_actionNames[info->action].c_str(), "/user/hand/right/input/grip/pose") == 0) {
-            controllerGrip = true;
         }
     } else {
         Log("[SimXR] xrCreateActionSpace: subactionPath is XR_NULL_PATH");
@@ -4652,7 +4629,6 @@ static XrResult XRAPI_PTR xrCreateActionSpace_runtime(XrSession, const XrActionS
  
     if (controllerType > 0) {
         Logf("[SimXR] xrCreateActionSpace: space %llu controller type %d", (unsigned long long) * space, controllerType);
-        rt::g_controllerGrip[*space] = controllerGrip;
         rt::g_controllerSpaces[*space] = controllerType;
     }
     return XR_SUCCESS;
@@ -4681,13 +4657,12 @@ static XrResult XRAPI_PTR xrCreateAction_runtime(XrActionSet, const XrActionCrea
     // actionName may not be null-terminated
     char actName[XR_MAX_ACTION_NAME_SIZE + 1] = {0};
     memcpy(actName, info->actionName, XR_MAX_ACTION_NAME_SIZE);
-    Logf("[SimXR] xrCreateAction: name=%s, type=%d", actName, info->actionType);
 
     // Store action name for input mapping
     rt::g_actionNames[*action] = actName;
 
     // Detect which hand this action is bound to based on subactionPaths
-    int handBinding = 0;  // 0=both/any
+    int handBinding = 0;
     if (info->countSubactionPaths > 0 && info->subactionPaths) {
         for (uint32_t i = 0; i < info->countSubactionPaths; i++) {
             auto it = rt::g_pathStrings.find(info->subactionPaths[i]);
@@ -4698,6 +4673,8 @@ static XrResult XRAPI_PTR xrCreateAction_runtime(XrActionSet, const XrActionCrea
         }
     }
     rt::g_actionHand[*action] = handBinding;
+
+    Logf("[SimXR] xrCreateAction: name=%s, type=%d, handBinding=%d -> %d", actName, info->actionType, handBinding, *action);
 
     return XR_SUCCESS;
 }
@@ -4710,10 +4687,9 @@ static XrResult XRAPI_PTR xrDestroyAction_runtime(XrAction action) {
 static XrResult XRAPI_PTR xrSuggestInteractionProfileBindings_runtime(XrInstance, const XrInteractionProfileSuggestedBinding* bindings) {
     if (!bindings) return XR_ERROR_VALIDATION_FAILURE;
     // interactionProfile is an XrPath (integer), not a C-string
-    bool valid = bindings->interactionProfile == 0x94cd5d85a027cef6; ///interaction_profiles/oculus/touch_controller
-    Logf("[SimXR] xrSuggestInteractionProfileBindings: profile=0x%llx, valid=%d",
-         (unsigned long long)bindings->interactionProfile, (int)valid);
-    return valid ? XR_SUCCESS : XR_ERROR_PATH_UNSUPPORTED;
+    Logf("[SimXR] xrSuggestInteractionProfileBindings: profile=0x%llx",
+         (unsigned long long)bindings->interactionProfile);
+    return XR_SUCCESS;
 }
 
 static XrResult XRAPI_PTR xrAttachSessionActionSets_runtime(XrSession, const XrSessionActionSetsAttachInfo* info) {
@@ -4895,6 +4871,7 @@ static XrResult XRAPI_PTR xrGetInputSourceLocalizedName_runtime(XrSession, const
         strncpy(buffer, name, bufferCapacityInput - 1);
         buffer[bufferCapacityInput - 1] = '\0';
     }
+    Logf("[SimXR] xrGetInputSourceLocalizedName: path=%d, name=%s", info->sourcePath, name);
     return XR_SUCCESS;
 }
 
