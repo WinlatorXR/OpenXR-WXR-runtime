@@ -203,19 +203,6 @@ static bool EnsureGLFramebufferFuncs() {
     return true;
 }
 
-static XrQuaternionf QuatFromYawPitch(float yaw, float pitch) {
-    const float cy = cosf(yaw * 0.5f);
-    const float sy = sinf(yaw * 0.5f);
-    const float cp = cosf(pitch * 0.5f);
-    const float sp = sinf(pitch * 0.5f);
-    XrQuaternionf q{};
-    q.x = sp * cy;
-    q.y = cp * sy;
-    q.z = -sp * sy;
-    q.w = cp * cy;
-    return q;
-}
-
 static XrQuaternionf QuatFromYawPitchRoll(float yaw, float pitch, float roll) {
     // Create rotations
     float cy = cosf(yaw * 0.5f);
@@ -4464,7 +4451,6 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
                             XR_VIEW_STATE_POSITION_TRACKED_BIT; 
     }
     if (cap < 2 || !views) return XR_SUCCESS;
-    const float ipd = 0.064f;
 
     //----------------
     //OXRWXR CHANGE:
