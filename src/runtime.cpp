@@ -3218,10 +3218,19 @@ static void blitD3D12ToPreview(rt::Session& s,
         return;
     }
 
-    // Wait for previous frame to finish
-    if (s.previewFence->GetCompletedValue() < s.previewFenceValue - 1) {
-        s.previewFence->SetEventOnCompletion(s.previewFenceValue - 1, s.previewFenceEvent);
-        WaitForSingleObject(s.previewFenceEvent, 1000);
+    // Allow multiple frames in flight before stalling the CPU.
+    // This reduces CPU/GPU synchronization and improves throughput.
+    constexpr UINT64 MaxFramesInFlight = 3;
+    if (s.previewFenceValue > MaxFramesInFlight) {
+        const UINT64 targetFence = s.previewFenceValue - MaxFramesInFlight;
+        const UINT64 completedFence = s.previewFence->GetCompletedValue();
+
+        if (completedFence < targetFence) {
+            HRESULT hr = s.previewFence->SetEventOnCompletion(targetFence, s.previewFenceEvent);
+            if (SUCCEEDED(hr)) {
+                WaitForSingleObject(s.previewFenceEvent, INFINITE);
+            }
+        }
     }
 
     // Get current backbuffer index
