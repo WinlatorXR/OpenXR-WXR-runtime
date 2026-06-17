@@ -281,11 +281,7 @@ static DXGI_FORMAT ToTypeless(DXGI_FORMAT format) {
 //---------------- 
 // Create global variables
 static bool verboseLogging = false;
-static std::string aerMode;
 static bool sendHaptics = true;
-
-static bool bEnableAltEyeRendering = false;
-static bool bAltEyeRender = false;
 
 static WinXrApiUDP* udpReader;
 
@@ -1397,29 +1393,20 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
         hmdMake = "FORCE FIX HANDS";
     }
 
-    bEnableAltEyeRendering = false;
-    bAltEyeRender = false;
-    aerMode = "1"; //3D SBS (0 for monocular VR, 2 for AER)
-
     //Load the config for the SimXR runtime
     if (std::filesystem::exists(confPath) && std::filesystem::is_directory(confPath)) {
         if (std::filesystem::exists(confFile) && std::filesystem::is_regular_file(confFile)) {
             try {
                 std::ifstream confFileOpen(confFile);
 
-                bool tryAER = false;
-
                 std::string line;
                 while (std::getline(confFileOpen, line)) {
                     if (compareKey(line, "display_mode")) {
                         if (compareValue(line, "both_eyes") && ui::g_uiState.viewMode != ui::ViewMode::BothEyes) {
-                            aerMode = "1";
                             ui::g_uiState.viewMode = ui::ViewMode::BothEyes;
                         } else if (compareValue(line, "left_eye") && ui::g_uiState.viewMode != ui::ViewMode::LeftEyeOnly) {
-                            aerMode = "0";
                             ui::g_uiState.viewMode = ui::ViewMode::LeftEyeOnly;
                         } else if (compareValue(line, "right_eye") && ui::g_uiState.viewMode != ui::ViewMode::RightEyeOnly) {
-                            aerMode = "0";
                             ui::g_uiState.viewMode = ui::ViewMode::RightEyeOnly;
                         }
                     }
@@ -1427,20 +1414,6 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
                     if (compareKey(line, "verbose_logging")) {
                         verboseLogging = parseBool(line);
                     }
-
-                    if (compareKey(line, "depth_mode")) {
-                        if (compareValue(line, "aer")) {
-                            tryAER = true;
-                        }
-                    }
-                }
-
-                if (tryAER) {
-                    //We will enable AER mode regardless of display_mode
-                    ui::g_uiState.viewMode = ui::ViewMode::LeftEyeOnly;
-                    bEnableAltEyeRendering = true;
-                    bAltEyeRender = false;
-                    aerMode = "2";
                 }
 
                 confFileOpen.close();
@@ -1459,7 +1432,7 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
 
     if (udpReader) {
         //Now we send the VR mode enable and target FOV of WinlatorXR at startup
-        udpReader->SendData("0 0 1 " + aerMode + " 0 0");
+        udpReader->SendData("0 0 1 1 0 0");
     }
 
     if (!createInfo || !instance) return XR_ERROR_VALIDATION_FAILURE;
@@ -2972,9 +2945,7 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
     //----------------
     // Red sync for (DX11)
     int redIntensity = OpenXRFrameID;
-
     int blueIntensity = 0;
-    if (bEnableAltEyeRendering && bAltEyeRender) blueIntensity = 255;
 
     if (!rtv) {
         Log("[SimXR] blitViewToHalf: rtv is null!");
@@ -3160,7 +3131,7 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
 
         if (flipColorOrder) {
             for (int i = 0; i < 10 * 10; i++) {
-                data[i * 4 + 0] = (bEnableAltEyeRendering && bAltEyeRender) ? 255 : 0; // B
+                data[i * 4 + 0] = 0;   // B
                 data[i * 4 + 1] = 0;   // G
                 data[i * 4 + 2] = OpenXRFrameID;   // R
                 data[i * 4 + 3] = 255; // A
@@ -3169,7 +3140,7 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
             for (int i = 0; i < 10 * 10; i++) {
                 data[i * 4 + 0] = OpenXRFrameID; // R
                 data[i * 4 + 1] = 0;   // G
-                data[i * 4 + 2] = (bEnableAltEyeRendering && bAltEyeRender) ? 255 : 0;   // B
+                data[i * 4 + 2] = 0;   // B
                 data[i * 4 + 3] = 255; // A
             }
         }
@@ -3324,9 +3295,7 @@ static void blitD3D12ToPreview(rt::Session& s,
             //----------------
             // Now with red sync for (DX12)
             float redIntensity = (OpenXRFrameID / 255.0f);
-
             float blueIntensity = 0.0f;
-            if (bEnableAltEyeRendering && bAltEyeRender) blueIntensity = 1.0f;
 
             if (idx >= chain.images12.size() || !chain.images12[idx]) return false;
             if (chain.imageStates12.size() <= idx) {
@@ -3829,7 +3798,7 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                 } colorBuffer;
                 colorBuffer.color[0] = redIntensity;
                 colorBuffer.color[1] = 0;
-                colorBuffer.color[2] = (bEnableAltEyeRendering && bAltEyeRender) ? 255 : 0;
+                colorBuffer.color[2] = 0;
                 colorBuffer.color[3] = 255;
                 s.d3d11Context->UpdateSubresource(s.colorConstantBuffer.Get(), 0, nullptr, &colorBuffer, 0, 0);
                 s.d3d11Context->PSSetConstantBuffers(0, 1, s.colorConstantBuffer.GetAddressOf());
@@ -4095,16 +4064,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             } else {
                 g_presentPending = true;
             }
-        }
-    }
-
-    if (bEnableAltEyeRendering) {
-        bAltEyeRender = !bAltEyeRender;
-
-        if (bAltEyeRender) {
-            ui::g_uiState.viewMode = ui::ViewMode::RightEyeOnly;
-        } else {
-            ui::g_uiState.viewMode = ui::ViewMode::LeftEyeOnly;
         }
     }
 }
@@ -5004,9 +4963,9 @@ static XrResult XRAPI_PTR xrGetViewConfigurationProperties_runtime(XrInstance, X
 static XrResult XRAPI_PTR xrApplyHapticFeedback_runtime(XrSession, const XrHapticActionInfo* info, const XrHapticBaseHeader* haptic) {
     if (udpReader) {
         if (sendHaptics) {
-            udpReader->SendData("1 1 1 " + aerMode + " 0 0");
+            udpReader->SendData("1 1 1 1 0 0");
         } else {
-            udpReader->SendData("0 0 1 " + aerMode + " 0 0");
+            udpReader->SendData("0 0 1 1 0 0");
         }
     }
 
@@ -5015,7 +4974,7 @@ static XrResult XRAPI_PTR xrApplyHapticFeedback_runtime(XrSession, const XrHapti
 
 static XrResult XRAPI_PTR xrStopHapticFeedback_runtime(XrSession, const XrHapticActionInfo* info) {
     if (udpReader) {
-        udpReader->SendData("0 0 1 " + aerMode + " 0 0");
+        udpReader->SendData("0 0 1 1 0 0");
     }
 
     return XR_SUCCESS;
