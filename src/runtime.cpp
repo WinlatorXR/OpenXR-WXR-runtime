@@ -1583,7 +1583,7 @@ static XrResult XRAPI_PTR xrEnumerateViewConfigurationViews_runtime(XrInstance, 
         for (uint32_t i = 0; i < 2; ++i) {
             views[i].type = XR_TYPE_VIEW_CONFIGURATION_VIEW;
             views[i].next = nullptr;
-            views[i].recommendedImageRectWidth = ViewportWidth;
+            views[i].recommendedImageRectWidth = ViewportWidth / 2;
             views[i].recommendedImageRectHeight = ViewportHeight;
             views[i].recommendedSwapchainSampleCount = 1;
             views[i].maxImageRectWidth = 4096; views[i].maxImageRectHeight = 4096; views[i].maxSwapchainSampleCount = 1;
