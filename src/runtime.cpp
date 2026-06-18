@@ -1414,11 +1414,7 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
 
     Logf("[WinXrUDP] Starting UDP");
     udpReader = new WinXrApiUDP();
-
-    if (udpReader) {
-        //Now we send the VR mode enable and target FOV of WinlatorXR at startup
-        udpReader->SendData("0 0 1 1 0 0");
-    }
+    udpReader->SendData("0 0 1 0 0 0");
 
     if (!createInfo || !instance) return XR_ERROR_VALIDATION_FAILURE;
     // applicationName may not be null-terminated
@@ -4453,6 +4449,13 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
     //----------------
     //OXRWXR CHANGE:
     //----------------
+    static bool first = true;
+    if (first) {
+        //Now we send the VR mode enable and target FOV of WinlatorXR
+        udpReader->SendData("0 0 1 1 0 0");
+        first = false;
+    }
+
     //Now we have the real quat
     XrQuaternionf orientation = { HMDQuat.x, HMDQuat.y, HMDQuat.z, HMDQuat.w };
 
