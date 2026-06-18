@@ -4700,7 +4700,13 @@ static XrResult XRAPI_PTR xrAttachSessionActionSets_runtime(XrSession, const XrS
 
 // Helper to get controller state based on action and subactionPath
 static rt::ControllerState* GetControllerForAction(XrAction action, XrPath subactionPath) {
-    // First check subactionPath
+    if (action != XR_NULL_PATH) {
+        if (rt::g_actionPaths.find(action) != rt::g_actionPaths.end()) {
+            auto pathIt = rt::g_pathStrings.find(rt::g_actionPaths[action]);
+            if (pathIt->second.find("left") != std::string::npos) return &rt::g_leftController;
+            if (pathIt->second.find("right") != std::string::npos) return &rt::g_rightController;
+        }
+    }
     if (subactionPath != XR_NULL_PATH) {
         auto pathIt = rt::g_pathStrings.find(subactionPath);
         if (pathIt != rt::g_pathStrings.end()) {
