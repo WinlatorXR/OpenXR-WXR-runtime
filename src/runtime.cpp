@@ -576,14 +576,12 @@ static void AddController(XrSpace* space, XrActionSpaceCreateInfo* info) {
 
             if (it != rt::g_pathStrings.end()) {
                 const std::string& pathStr = it->second;
-                Logf("[SimXR] xrCreateActionSpace: found path='%s'", pathStr.c_str());
                 if (pathStr.find("/user/hand/left") != std::string::npos) {
                     controllerType = 1;  // Left controller
                 } else if (pathStr.find("/user/hand/right") != std::string::npos) {
                     controllerType = 2;  // Right controller
-                } else {
-                    Logf("[SimXR] AddController: No controller space for %s", it->second.c_str());
                 }
+                Logf("[SimXR] AddController: space=%d, type=%d, grip=%d", *space, controllerType, (int)controllerGrip);
             }
         }
     } else {
