@@ -550,9 +550,6 @@ static std::unordered_map<XrPath, std::string> g_pathStrings;
 // Map XrAction to action name for input mapping
 static std::unordered_map<XrAction, std::string> g_actionNames;
 
-// Map XrAction to which hand it's bound to (0=both/any, 1=left, 2=right)
-static std::unordered_map<XrAction, int> g_actionHand;
-
 // Time tracking for velocity calculation
 static XrTime g_lastFrameTime = 0;
 
@@ -4663,20 +4660,7 @@ static XrResult XRAPI_PTR xrCreateAction_runtime(XrActionSet, const XrActionCrea
     // Store action name for input mapping
     rt::g_actionNames[*action] = actName;
 
-    // Detect which hand this action is bound to based on subactionPaths
-    int handBinding = 0;
-    if (info->countSubactionPaths > 0 && info->subactionPaths) {
-        for (uint32_t i = 0; i < info->countSubactionPaths; i++) {
-            auto it = rt::g_pathStrings.find(info->subactionPaths[i]);
-            if (it != rt::g_pathStrings.end()) {
-                if (it->second.find("left") != std::string::npos) handBinding |= 1;
-                if (it->second.find("right") != std::string::npos) handBinding |= 2;
-            }
-        }
-    }
-    rt::g_actionHand[*action] = handBinding;
-
-    Logf("[SimXR] xrCreateAction: name=%s, type=%d, handBinding=%d -> %d", actName, info->actionType, handBinding, *action);
+    Logf("[SimXR] xrCreateAction: name=%s, type=%d", actName, info->actionType);
 
     return XR_SUCCESS;
 }
@@ -4723,12 +4707,6 @@ static rt::ControllerState* GetControllerForAction(XrAction action, XrPath subac
             if (pathIt->second.find("left") != std::string::npos) return &rt::g_leftController;
             if (pathIt->second.find("right") != std::string::npos) return &rt::g_rightController;
         }
-    }
-    // Fall back to action's hand binding
-    auto handIt = rt::g_actionHand.find(action);
-    if (handIt != rt::g_actionHand.end()) {
-        if (handIt->second == 1) return &rt::g_leftController;
-        if (handIt->second == 2) return &rt::g_rightController;
     }
     // Default to right hand
     return &rt::g_rightController;
