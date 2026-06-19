@@ -3842,20 +3842,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
             blitRedQuad(vpOXR, OpenXRFrameID);
 
-            // Update window title with FPS
-            static int glTitleFrameCount = 0;
-            static auto glLastTitleUpdate = std::chrono::high_resolution_clock::now();
-            static int glLastFPS = 0;
-            glTitleFrameCount++;
-            auto now = std::chrono::high_resolution_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - glLastTitleUpdate).count();
-            if (elapsed >= 500) {
-                glLastFPS = (int)(glTitleFrameCount * 1000 / elapsed);
-                glTitleFrameCount = 0;
-                glLastTitleUpdate = now;
-                ui::UpdateWindowTitle(s.hwnd, glLastFPS, 0);
-            }
-
             // Present (may be deferred if overlays are pending)
             if (!skipPresent) {
                 MSG msg;
@@ -4006,21 +3992,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             } else {
                 g_presentPending = true;
             }
-
-            // Update window title with stats
-            static int titleFrameCount = 0;
-            static auto lastTitleUpdate = std::chrono::high_resolution_clock::now();
-            static int lastFPS = 0;
-            titleFrameCount++;
-            auto now = std::chrono::high_resolution_clock::now();
-            auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastTitleUpdate).count();
-            if (elapsed >= 500) {
-                lastFPS = (int)(titleFrameCount * 1000 / elapsed);
-                titleFrameCount = 0;
-                lastTitleUpdate = now;
-                ui::UpdateWindowTitle(s.hwnd, lastFPS, 0);
-            }
-
         } else {
             // ===== D3D12 PATH =====
             if (!s.previewSwapchain12) return;
