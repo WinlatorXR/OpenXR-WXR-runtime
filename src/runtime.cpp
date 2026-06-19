@@ -135,7 +135,6 @@ static PFNGLCHECKFRAMEBUFFERSTATUSPROC g_glCheckFramebufferStatus = nullptr;
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <loader_interfaces.h>
-#include "mcp_integration.h"
 #include "ui_enhancements.h"
 
 using Microsoft::WRL::ComPtr;
