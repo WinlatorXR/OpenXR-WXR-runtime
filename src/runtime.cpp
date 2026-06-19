@@ -444,8 +444,6 @@ struct Session {
     ComPtr<ID3D11PixelShader> blitPS;
     ComPtr<ID3D11SamplerState> samplerState;
     ComPtr<ID3D11RasterizerState> noCullRS;  // Rasterizer state with culling disabled
-    ComPtr<ID3D11BlendState> anaglyphRedBS;
-    ComPtr<ID3D11BlendState> anaglyphCyanBS;
     ComPtr<ID3D11VertexShader> solidColorVS;
     ComPtr<ID3D11PixelShader> solidColorPS;
     ComPtr<ID3D11InputLayout> simpleVertexLayout = nullptr;
@@ -668,8 +666,7 @@ static inline XrVector3f RotateVectorByQuaternion(const XrQuaternionf& q, const 
 
 // Initialize shader resources for blitting
 bool InitBlitResources(Session& s) {
-    if (s.blitVS && s.blitPS && s.samplerState && s.noCullRS &&
-        s.anaglyphRedBS && s.anaglyphCyanBS) {
+    if (s.blitVS && s.blitPS && s.samplerState && s.noCullRS) {
         return true;
     }
 
@@ -822,20 +819,6 @@ bool InitBlitResources(Session& s) {
     rsDesc.AntialiasedLineEnable = FALSE;
     hr = s.d3d11Device->CreateRasterizerState(&rsDesc, s.noCullRS.GetAddressOf());
     if (FAILED(hr)) { Logf("[SimXR] Failed to create RasterizerState: 0x%08X", hr); return false; }
-
-    // Create blend states for anaglyph rendering
-    D3D11_BLEND_DESC blendDesc{};
-    blendDesc.AlphaToCoverageEnable = FALSE;
-    blendDesc.IndependentBlendEnable = FALSE;
-    blendDesc.RenderTarget[0].BlendEnable = FALSE;
-    blendDesc.RenderTarget[0].RenderTargetWriteMask = D3D11_COLOR_WRITE_ENABLE_RED;
-    hr = s.d3d11Device->CreateBlendState(&blendDesc, s.anaglyphRedBS.GetAddressOf());
-    if (FAILED(hr)) { Logf("[SimXR] Failed to create anaglyph red blend state: 0x%08X", hr); return false; }
-
-    blendDesc.RenderTarget[0].RenderTargetWriteMask =
-        D3D11_COLOR_WRITE_ENABLE_GREEN | D3D11_COLOR_WRITE_ENABLE_BLUE;
-    hr = s.d3d11Device->CreateBlendState(&blendDesc, s.anaglyphCyanBS.GetAddressOf());
-    if (FAILED(hr)) { Logf("[SimXR] Failed to create anaglyph cyan blend state: 0x%08X", hr); return false; }
 
     if (verboseLogging) Log("[SimXR] Blit resources initialized successfully.");
     return true;
@@ -3555,8 +3538,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                 s.blitPS.Reset();
                 s.samplerState.Reset();
                 s.noCullRS.Reset();
-                s.anaglyphRedBS.Reset();
-                s.anaglyphCyanBS.Reset();
                 Log("[SimXR] Reset blit resources for fresh shader compilation");
             }
 
@@ -3909,9 +3890,7 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             // Bind RTV and clear
             ID3D11RenderTargetView* rtvs[1] = { rtv.Get() };
             s.d3d11Context->OMSetRenderTargets(1, rtvs, nullptr);
-            const float clearColorDefault[4] = {0.1f, 0.1f, 0.2f, 1.0f};
-            const float clearColorAnaglyph[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-            const float* clearColor = (layout == ui::DisplayLayout::Anaglyph) ? clearColorAnaglyph : clearColorDefault;
+            const float clearColor[4] = {0.1f, 0.1f, 0.2f, 1.0f};
             s.d3d11Context->ClearRenderTargetView(rtv.Get(), clearColor);
 
             D3D11_VIEWPORT fullVp = {};
@@ -3930,16 +3909,9 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                 rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
             }
 
-            ID3D11BlendState* leftBlend = nullptr;
-            ID3D11BlendState* rightBlend = nullptr;
-            if (!singleEye && layout == ui::DisplayLayout::Anaglyph) {
-                leftBlend = s.anaglyphRedBS.Get();
-                rightBlend = s.anaglyphCyanBS.Get();
-            }
-
             if (showLeft) {
                 blitViewToHalf(s, chL, leftIdx, vL.subImage.imageArrayIndex, vL.subImage.imageRect,
-                               rtv.Get(), leftVp, leftBlend, true);
+                               rtv.Get(), leftVp, nullptr, true);
             }
 
             // Blit right eye
@@ -3953,11 +3925,11 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                     rightIdx = chR.lastAcquired;
                 }
                 blitViewToHalf(s, chR, rightIdx, vR.subImage.imageArrayIndex, vR.subImage.imageRect,
-                               rtv.Get(), rightVp, rightBlend, !showLeft);
+                               rtv.Get(), rightVp, nullptr, !showLeft);
             } else if (showRight && !showLeft) {
                 // Mirror left eye if right-only mode but only one view
                 blitViewToHalf(s, chL, leftIdx, vL.subImage.imageArrayIndex, vL.subImage.imageRect,
-                               rtv.Get(), rightVp, rightBlend, true);
+                               rtv.Get(), rightVp, nullptr, true);
             }
 
             // Present D3D11 (may be deferred if overlays are pending)
