@@ -135,7 +135,6 @@ static PFNGLCHECKFRAMEBUFFERSTATUSPROC g_glCheckFramebufferStatus = nullptr;
 #include <openxr/openxr.h>
 #include <openxr/openxr_platform.h>
 #include <loader_interfaces.h>
-#include "ui_enhancements.h"
 
 using Microsoft::WRL::ComPtr;
 
@@ -913,26 +912,6 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
                 rt::g_lastMousePos.y = centerY;
             }
             return 0;
-        case WM_COMMAND:
-            if (ui::HandleMenuCommand(hWnd, wParam,
-                []() { /* Resize handled by presentProjection based on zoom */ },
-                []() { rt::g_headPos = {0, 0, 0, 1.7f}; rt::g_headYaw = 0; rt::g_headPitch = 0; rt::g_headRoll = 0; }
-            )) {
-                return 0;
-            }
-            break;
-        case WM_KEYDOWN:
-            if (!rt::g_mouseCapture) {
-                if (ui::HandleKeyboardShortcut(hWnd, wParam,
-                    []() { /* Resize handled by presentProjection based on zoom */ },
-                    []() { rt::g_headPos = {0, 0, 0, 1.7f}; rt::g_headYaw = 0; rt::g_headPitch = 0; rt::g_headRoll = 0; }
-                )) {
-                    return 0;
-                }
-            }
-            break;
-        case WM_MOUSEWHEEL:
-            break;
         default:
             break;
     }
@@ -2730,9 +2709,6 @@ static void ensurePreviewSized(rt::Session& s, UINT width, UINT height, DXGI_FOR
                 // DXGI only allows one swapchain per window
                 rt::g_persistentSwapchain.Reset();
 
-                // Apply dark theme if not already applied
-                ui::ApplyDarkTheme(s.hwnd);
-                
                 // Just resize the existing window if needed
                 RECT rc = { 0, 0, (LONG)width, (LONG)height };
                 AdjustWindowRect(&rc, WS_OVERLAPPEDWINDOW, FALSE);
@@ -2760,13 +2736,6 @@ static void ensurePreviewSized(rt::Session& s, UINT width, UINT height, DXGI_FOR
             SetWindowPos(s.hwnd, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             
             if (verboseLogging) Logf("[SimXR] Created new preview window: hwnd=%p size=%ux%u", s.hwnd, width, height);
-
-            // Apply dark theme and menu
-            ui::ApplyDarkTheme(s.hwnd);
-            ui::g_uiState.windowWidth = width;
-            ui::g_uiState.windowHeight = height;
-
-
 
             //----------------
             //OXRWXR CHANGE:
@@ -3026,43 +2995,26 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
                  rect.offset.x, rect.offset.y, rect.extent.width, rect.extent.height, srcW, srcH);
         }
     }
-    bool shouldCrop = !ui::g_uiState.showFullRender &&
-                      srcDesc.SampleDesc.Count == 1 &&
-                      rectValid &&
-                      (rectW < srcW || rectH < srcH || rectX != 0 || rectY != 0);
-    if (shouldCrop) {
-        
-        // Recreate temp texture with rect size for cropped copying
-        tempDesc.Width  = rectW;
-        tempDesc.Height = rectH;
-        tempDesc.Format = typedFormat;  // Ensure format stays correct
-        viewTexture.Reset();
-        HRESULT hr = s.d3d11Device->CreateTexture2D(&tempDesc, nullptr, viewTexture.GetAddressOf());
-        if (FAILED(hr)) {
-            Logf("[SimXR] Failed to create cropped temp texture: 0x%08X", hr);
-            return;
-        }
-        
-        // Copy only the specified rect
-        D3D11_BOX box{};
-        box.left = rectX;
-        box.top = rectY;
-        box.right = rectX + rectW;
-        box.bottom = rectY + rectH;
-        box.front = 0; 
-        box.back = 1;
-        
-        s.d3d11Context->CopySubresourceRegion(viewTexture.Get(), 0, 0, 0, 0, sourceTexture.Get(), srcSubresource, &box);
-    } else {
-        // Copy full texture or handle MSAA
-        if (srcDesc.SampleDesc.Count > 1) {
-            // If app used MSAA, resolve it first using the typed format
-            s.d3d11Context->ResolveSubresource(viewTexture.Get(), 0, sourceTexture.Get(), srcSubresource, typedFormat);
-        } else {
-            // Otherwise just copy the full texture
-            s.d3d11Context->CopySubresourceRegion(viewTexture.Get(), 0, 0, 0, 0, sourceTexture.Get(), srcSubresource, nullptr);
-        }
+
+    // Recreate temp texture with rect size for cropped copying
+    tempDesc.Width  = rectW;
+    tempDesc.Height = rectH;
+    tempDesc.Format = typedFormat;  // Ensure format stays correct
+    viewTexture.Reset();
+    if (FAILED(s.d3d11Device->CreateTexture2D(&tempDesc, nullptr, viewTexture.GetAddressOf()))) {
+        Logf("[SimXR] Failed to create cropped temp texture: 0x%08X", hr);
+        return;
     }
+
+    // Copy only the specified rect
+    D3D11_BOX box{};
+    box.left = rectX;
+    box.top = rectY;
+    box.right = rectX + rectW;
+    box.bottom = rectY + rectH;
+    box.front = 0;
+    box.back = 1;
+    s.d3d11Context->CopySubresourceRegion(viewTexture.Get(), 0, 0, 0, 0, sourceTexture.Get(), srcSubresource, &box);
 
     //----------------
     //OXRWXR CHANGE:
@@ -3519,9 +3471,8 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
             // Use the standard preview path now that we have a D3D11 device
             DXGI_FORMAT displayFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-            int targetWidth = (int)width;
+            int targetWidth = (int)width * 2;
             int targetHeight = (int)height;
-            ui::CalculateWindowSize((int)width, (int)height, targetWidth, targetHeight);
 
             if (glFrameCount % 60 == 1 && verboseLogging) {
                 Logf("[SimXR] GL PREVIEW: targetSize=%dx%d, calling ensurePreviewSized", targetWidth, targetHeight);
@@ -3783,9 +3734,8 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
         // Use UNORM format for swapchain (SRGB not valid for FLIP_DISCARD)
         // We create SRGB RTVs for proper gamma when rendering
         DXGI_FORMAT displayFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        int targetWidth = (int)width;
+        int targetWidth = (int)width * 2;
         int targetHeight = (int)height;
-        ui::CalculateWindowSize((int)width, (int)height, targetWidth, targetHeight);
         ensurePreviewSized(s, (UINT)targetWidth, (UINT)targetHeight, displayFormat);
 
         // Get left image index

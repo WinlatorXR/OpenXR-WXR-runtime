@@ -21,7 +21,6 @@ include_directories(${CMAKE_SOURCE_DIR}/src)
 add_library(openxr_wxr SHARED
     src/runtime.cpp
     src/WinXrApiUDP.cpp
-    src/ui_enhancements.h
 )
 
 # Link libraries
@@ -31,7 +30,6 @@ target_link_libraries(openxr_wxr
     dxgi
     d3dcompiler
     dwmapi
-    uxtheme
 )
 
 # Windows-specific settings
