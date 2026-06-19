@@ -1366,16 +1366,6 @@ static XrResult XRAPI_PTR xrCreateInstance_runtime(const XrInstanceCreateInfo* c
 
                 std::string line;
                 while (std::getline(confFileOpen, line)) {
-                    if (compareKey(line, "display_mode")) {
-                        if (compareValue(line, "both_eyes") && ui::g_uiState.viewMode != ui::ViewMode::BothEyes) {
-                            ui::g_uiState.viewMode = ui::ViewMode::BothEyes;
-                        } else if (compareValue(line, "left_eye") && ui::g_uiState.viewMode != ui::ViewMode::LeftEyeOnly) {
-                            ui::g_uiState.viewMode = ui::ViewMode::LeftEyeOnly;
-                        } else if (compareValue(line, "right_eye") && ui::g_uiState.viewMode != ui::ViewMode::RightEyeOnly) {
-                            ui::g_uiState.viewMode = ui::ViewMode::RightEyeOnly;
-                        }
-                    }
-
                     if (compareKey(line, "verbose_logging")) {
                         verboseLogging = parseBool(line);
                     }
@@ -3164,8 +3154,7 @@ static void blitViewToHalf(rt::Session& s, rt::Swapchain& chain, uint32_t srcInd
 // D3D12 blit function - copies swapchain textures to preview backbuffer
 static void blitD3D12ToPreview(rt::Session& s,
                                 rt::Swapchain& chainL, uint32_t leftIdx, uint32_t leftSlice,
-                                rt::Swapchain* chainR, uint32_t rightIdx, uint32_t rightSlice,
-                                ui::DisplayLayout layout, ui::ViewMode viewMode) {
+                                rt::Swapchain* chainR, uint32_t rightIdx, uint32_t rightSlice) {
     if (!s.previewSwapchain12 || !s.previewCmdList || !s.previewCmdAlloc) {
         Log("[SimXR] blitD3D12ToPreview: Missing D3D12 preview resources");
         return;
@@ -3316,33 +3305,20 @@ static void blitD3D12ToPreview(rt::Session& s,
             return true;
         };
 
-    bool singleEye = (viewMode != ui::ViewMode::BothEyes);
-    ui::DisplayLayout effectiveLayout = ui::DisplayLayout::SideBySide;
-
     const bool hasLeft = leftIdx < chainL.images12.size() && chainL.images12[leftIdx];
     const bool hasRight = chainR && rightIdx < chainR->images12.size() && chainR->images12[rightIdx];
 
     // Single-eye mode: render selected eye full-screen
-    if (singleEye) {
-        if (viewMode == ui::ViewMode::RightEyeOnly && hasRight) {
-            copyEye(*chainR, rightIdx, rightSlice, 0, 0, "R", true);
-        } else if (hasLeft) {
-            copyEye(chainL, leftIdx, leftSlice, 0, 0, "L", true);
-        } else if (hasRight) {
-            copyEye(*chainR, rightIdx, rightSlice, 0, 0, "R", true);
-        }
-    } else {
-        UINT rightX = (effectiveLayout == ui::DisplayLayout::OverUnder) ? 0 : (UINT)(s.previewWidth / 2);
-        UINT rightY = (effectiveLayout == ui::DisplayLayout::OverUnder) ? (UINT)(s.previewHeight / 2) : 0;
+    UINT rightX = (UINT)(s.previewWidth / 2);
+    UINT rightY = 0;
 
-        if (hasLeft) {
-            copyEye(chainL, leftIdx, leftSlice, 0, 0, "L", true);
-        }
-        if (hasRight) {
-            copyEye(*chainR, rightIdx, rightSlice, rightX, rightY, "R", false);
-        } else if (hasLeft) {
-            copyEye(chainL, leftIdx, leftSlice, rightX, rightY, "L", false);
-        }
+    if (hasLeft) {
+        copyEye(chainL, leftIdx, leftSlice, 0, 0, "L", true);
+    }
+    if (hasRight) {
+        copyEye(*chainR, rightIdx, rightSlice, rightX, rightY, "R", false);
+    } else if (hasLeft) {
+        copyEye(chainL, leftIdx, leftSlice, rightX, rightY, "L", false);
     }
 
     // Transition backbuffer back to present
@@ -3543,8 +3519,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
             // Use the standard preview path now that we have a D3D11 device
             DXGI_FORMAT displayFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-            auto viewMode = ui::g_uiState.viewMode;
-            const auto layout = ui::g_uiState.displayLayout;
             int targetWidth = (int)width;
             int targetHeight = (int)height;
             ui::CalculateWindowSize((int)width, (int)height, targetWidth, targetHeight);
@@ -3588,11 +3562,6 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             initData.pSysMem = rightPixels.data();
             ComPtr<ID3D11Texture2D> rightTex2D;
             s.d3d11Device->CreateTexture2D(&texDesc, &initData, &rightTex2D);
-
-            // Use shader-based rendering for proper side-by-side display
-            bool singleEye = (viewMode != ui::ViewMode::BothEyes);
-            bool showLeft = (viewMode != ui::ViewMode::RightEyeOnly);
-            bool showRight = (viewMode != ui::ViewMode::LeftEyeOnly);
 
             // Initialize blit resources if not already done
             if (!rt::InitBlitResources(s)) {
@@ -3644,11 +3613,9 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
             D3D11_VIEWPORT leftVp = fullVp;
             D3D11_VIEWPORT rightVp = fullVp;
-            if (!singleEye) {
-                leftVp.Width = (float)s.previewWidth / 2.0f;
-                rightVp.Width = (float)s.previewWidth / 2.0f;
-                rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
-            }
+            leftVp.Width = (float)s.previewWidth / 2.0f;
+            rightVp.Width = (float)s.previewWidth / 2.0f;
+            rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
 
             // Helper lambda to blit a texture to a viewport
             auto blitTexture = [&](ID3D11ShaderResourceView* srv, const D3D11_VIEWPORT& vp) {
@@ -3768,26 +3735,14 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
                 // Clean up
                 vertexBuffer->Release();
-                };
+            };
 
             // Render the eyes
-            if (singleEye) {
-                if (showLeft && leftSRV) {
-                    blitTexture(leftSRV.Get(), fullVp);
-                } else if (showRight && rightSRV) {
-                    blitTexture(rightSRV.Get(), fullVp);
-                }
-            } else {
-                // Side by side (or over/under)
-                if (showLeft && leftSRV) {
-                    blitTexture(leftSRV.Get(), leftVp);
-                }
-                if (showRight && rightSRV) {
-                    blitTexture(rightSRV.Get(), rightVp);
-                } else if (showRight && leftSRV) {
-                    // Mirror left eye if no right eye available
-                    blitTexture(leftSRV.Get(), rightVp);
-                }
+            if (leftSRV) {
+                blitTexture(leftSRV.Get(), leftVp);
+            }
+            if (rightSRV) {
+                blitTexture(rightSRV.Get(), rightVp);
             }
 
             //----------------
@@ -3828,15 +3783,10 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
         // Use UNORM format for swapchain (SRGB not valid for FLIP_DISCARD)
         // We create SRGB RTVs for proper gamma when rendering
         DXGI_FORMAT displayFormat = DXGI_FORMAT_R8G8B8A8_UNORM;
-        auto viewMode = ui::g_uiState.viewMode;
-        const auto layout = ui::g_uiState.displayLayout;
         int targetWidth = (int)width;
         int targetHeight = (int)height;
         ui::CalculateWindowSize((int)width, (int)height, targetWidth, targetHeight);
         ensurePreviewSized(s, (UINT)targetWidth, (UINT)targetHeight, displayFormat);
-        bool singleEye = (viewMode != ui::ViewMode::BothEyes);
-        bool showLeft = (viewMode != ui::ViewMode::RightEyeOnly);
-        bool showRight = (viewMode != ui::ViewMode::LeftEyeOnly);
 
         // Get left image index
         uint32_t leftIdx = 0;
@@ -3903,19 +3853,15 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
 
             D3D11_VIEWPORT leftVp = fullVp;
             D3D11_VIEWPORT rightVp = fullVp;
-            if (!singleEye) {
-                leftVp.Width = (float)s.previewWidth / 2.0f;
-                rightVp.Width = (float)s.previewWidth / 2.0f;
-                rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
-            }
+            leftVp.Width = (float)s.previewWidth / 2.0f;
+            rightVp.Width = (float)s.previewWidth / 2.0f;
+            rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
 
-            if (showLeft) {
-                blitViewToHalf(s, chL, leftIdx, vL.subImage.imageArrayIndex, vL.subImage.imageRect,
-                               rtv.Get(), leftVp, nullptr, true);
-            }
+            blitViewToHalf(s, chL, leftIdx, vL.subImage.imageArrayIndex, vL.subImage.imageRect,
+                           rtv.Get(), leftVp, nullptr, true);
 
             // Blit right eye
-            if (showRight && proj.viewCount > 1) {
+            if (proj.viewCount > 1) {
                 const auto& vR = proj.views[1];
                 auto& chR = const_cast<rt::Swapchain&>(*chRPtr);
                 uint32_t rightIdx = 0;
@@ -3925,11 +3871,7 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                     rightIdx = chR.lastAcquired;
                 }
                 blitViewToHalf(s, chR, rightIdx, vR.subImage.imageArrayIndex, vR.subImage.imageRect,
-                               rtv.Get(), rightVp, nullptr, !showLeft);
-            } else if (showRight && !showLeft) {
-                // Mirror left eye if right-only mode but only one view
-                blitViewToHalf(s, chL, leftIdx, vL.subImage.imageArrayIndex, vL.subImage.imageRect,
-                               rtv.Get(), rightVp, nullptr, true);
+                               rtv.Get(), rightVp, nullptr, false);
             }
 
             // Present D3D11 (may be deferred if overlays are pending)
@@ -3955,11 +3897,10 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
                     rightIdx = chR.lastAcquired;
                 }
                 blitD3D12ToPreview(s, chL, leftIdx, vL.subImage.imageArrayIndex,
-                                   &chR, rightIdx, vR.subImage.imageArrayIndex,
-                                   layout, viewMode);
+                                   &chR, rightIdx, vR.subImage.imageArrayIndex);
             } else {
                 blitD3D12ToPreview(s, chL, leftIdx, vL.subImage.imageArrayIndex,
-                                   nullptr, 0, 0, layout, viewMode);
+                                   nullptr, 0, 0);
             }
 
             // Present D3D12 (may be deferred if overlays are pending)
