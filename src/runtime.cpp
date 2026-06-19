@@ -3334,25 +3334,13 @@ static void blitD3D12ToPreview(rt::Session& s,
         };
 
     bool singleEye = (viewMode != ui::ViewMode::BothEyes);
-    bool forceSingleEye = false;
-    static bool loggedAnaglyph = false;
-    ui::DisplayLayout effectiveLayout = layout;
-    if (!singleEye && layout == ui::DisplayLayout::Anaglyph) {
-        if (!loggedAnaglyph) {
-            Log("[SimXR] blitD3D12ToPreview: Anaglyph not supported on D3D12 path; showing left eye only");
-            loggedAnaglyph = true;
-        }
-        forceSingleEye = true;
-    }
-    if (effectiveLayout == ui::DisplayLayout::Anaglyph) {
-        effectiveLayout = ui::DisplayLayout::SideBySide;
-    }
+    ui::DisplayLayout effectiveLayout = ui::DisplayLayout::SideBySide;
 
     const bool hasLeft = leftIdx < chainL.images12.size() && chainL.images12[leftIdx];
     const bool hasRight = chainR && rightIdx < chainR->images12.size() && chainR->images12[rightIdx];
 
     // Single-eye mode: render selected eye full-screen
-    if (singleEye || forceSingleEye) {
+    if (singleEye) {
         if (viewMode == ui::ViewMode::RightEyeOnly && hasRight) {
             copyEye(*chainR, rightIdx, rightSlice, 0, 0, "R", true);
         } else if (hasLeft) {
@@ -3676,15 +3664,9 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             D3D11_VIEWPORT leftVp = fullVp;
             D3D11_VIEWPORT rightVp = fullVp;
             if (!singleEye) {
-                if (layout == ui::DisplayLayout::SideBySide) {
-                    leftVp.Width = (float)s.previewWidth / 2.0f;
-                    rightVp.Width = (float)s.previewWidth / 2.0f;
-                    rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
-                } else if (layout == ui::DisplayLayout::OverUnder) {
-                    leftVp.Height = (float)s.previewHeight / 2.0f;
-                    rightVp.Height = (float)s.previewHeight / 2.0f;
-                    rightVp.TopLeftY = (float)s.previewHeight / 2.0f;
-                }
+                leftVp.Width = (float)s.previewWidth / 2.0f;
+                rightVp.Width = (float)s.previewWidth / 2.0f;
+                rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
             }
 
             // Helper lambda to blit a texture to a viewport
@@ -3943,15 +3925,9 @@ static void presentProjection(rt::Session& s, const XrCompositionLayerProjection
             D3D11_VIEWPORT leftVp = fullVp;
             D3D11_VIEWPORT rightVp = fullVp;
             if (!singleEye) {
-                if (layout == ui::DisplayLayout::SideBySide) {
-                    leftVp.Width = (float)s.previewWidth / 2.0f;
-                    rightVp.Width = (float)s.previewWidth / 2.0f;
-                    rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
-                } else if (layout == ui::DisplayLayout::OverUnder) {
-                    leftVp.Height = (float)s.previewHeight / 2.0f;
-                    rightVp.Height = (float)s.previewHeight / 2.0f;
-                    rightVp.TopLeftY = (float)s.previewHeight / 2.0f;
-                }
+                leftVp.Width = (float)s.previewWidth / 2.0f;
+                rightVp.Width = (float)s.previewWidth / 2.0f;
+                rightVp.TopLeftX = (float)s.previewWidth / 2.0f;
             }
 
             ID3D11BlendState* leftBlend = nullptr;

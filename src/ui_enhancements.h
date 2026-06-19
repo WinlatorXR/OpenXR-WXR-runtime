@@ -261,30 +261,8 @@ inline void ShowAboutDialog(HWND parent) {
 // Calculate the preview window size based on source size and zoom
 // NOTE: srcWidth and srcHeight are the dimensions of a SINGLE EYE swapchain
 inline void CalculateWindowSize(int srcWidth, int srcHeight, int& outWidth, int& outHeight) {
-    float zoom = g_uiState.fitToWindow ? 0.5f : g_uiState.zoomLevel;
-
-    switch (g_uiState.viewMode) {
-        case ViewMode::BothEyes:
-            if (g_uiState.displayLayout == DisplayLayout::SideBySide) {
-                // Two eyes side by side: double the width
-                outWidth = (int)(srcWidth * 2 * zoom);
-                outHeight = (int)(srcHeight * zoom);
-            } else if (g_uiState.displayLayout == DisplayLayout::OverUnder) {
-                // Two eyes stacked: double the height
-                outWidth = (int)(srcWidth * zoom);
-                outHeight = (int)(srcHeight * 2 * zoom);
-            } else { // Anaglyph - both eyes overlap in same frame
-                outWidth = (int)(srcWidth * zoom);
-                outHeight = (int)(srcHeight * zoom);
-            }
-            break;
-        case ViewMode::LeftEyeOnly:
-        case ViewMode::RightEyeOnly:
-            // Single eye: just use the single eye dimensions
-            outWidth = (int)(srcWidth * zoom);
-            outHeight = (int)(srcHeight * zoom);
-            break;
-    }
+    outWidth = (int)srcWidth * 2;
+    outHeight = (int)srcHeight;
 
     // Ensure minimum size
     outWidth = (std::max)(outWidth, 320);
