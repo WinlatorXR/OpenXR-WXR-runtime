@@ -566,6 +566,7 @@ static void AddController(XrSpace* space, XrActionSpaceCreateInfo* info) {
             }
             if (info->subactionPath != XR_NULL_PATH) {
                 it = rt::g_pathStrings.find(info->subactionPath);
+                UpsideDownHandsFix = true;
             }
 
             if (it != rt::g_pathStrings.end()) {
@@ -2542,12 +2543,17 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
 
     //PICO and Quest 2 are both tested to need the hand orientation flipped, assume the same for Quest Pro for now
     if (hmdMake == "PICO" || hmdModel == "QUEST 2" || hmdMake == "PLAY FOR DREAM" || hmdMake == "FORCE FIX HANDS") {
-        XrVector4f flip = { 0.0f, 0.0f, 1.0f, 0.0f }; // 180° rotation around X-axis
+        XrVector4f flip = { 0.0f, 0.0f, 1.0f, 0.0f };
         LHandQuat = QuaternionMultiply(flip, LHandQuat);
         RHandQuat = QuaternionMultiply(flip, RHandQuat);
-        UpsideDownHandsFix = true;
-    } else {
-        UpsideDownHandsFix = false;
+        LGHandQuat = QuaternionMultiply(flip, LGHandQuat);
+        RGHandQuat = QuaternionMultiply(flip, RGHandQuat);
+    }
+    //Ugly workaround to orient the hands in Unity correctly
+    if (UpsideDownHandsFix) {
+        XrVector4f flip = { 0.0f, 0.0f, 1.0f, 0.0f };
+        LHandQuat = QuaternionMultiply(LHandQuat, flip);
+        RHandQuat = QuaternionMultiply(RHandQuat, flip);
     }
 
     //Brute force melee gesture logging
