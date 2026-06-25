@@ -219,7 +219,6 @@ static XrQuaternionf QuatFromYawPitchRoll(float yaw, float pitch, float roll) {
     return q;
 }
 
-
 // Helper function to convert a typed format to typeless
 static DXGI_FORMAT ToTypeless(DXGI_FORMAT format) {
     switch (format) {
@@ -484,14 +483,6 @@ static Instance g_instance{};
 static Session g_session{};
 static std::unordered_map<XrSwapchain, Swapchain> g_swapchains;
 uintptr_t g_nextSwapchainHandle = 1;
-
-// Head tracking state for mouse look and WASD movement
-static XrVector4f g_headPos = {0.0f, 0.0f, 0.0f, 1.7f};  // Start at standing eye height
-static float g_headYaw = 0.0f;    // Rotation around Y axis (left/right)
-static float g_headPitch = 0.0f;  // Rotation around X axis (up/down)
-static float g_headRoll = 0.0f;  // Rotation around Z axis (roll)
-static bool g_mouseCapture = false;
-static POINT g_lastMousePos = {0, 0};
 
 // Controller tracking state for motion controller emulation
 // Positions are relative to head position, orientation follows head by default
@@ -876,42 +867,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
             }
             return 0;
         case WM_LBUTTONDOWN:
-            if (verboseLogging) Logf("[SimXR] WM_LBUTTONDOWN: focused=%d", rt::g_session.isFocused.load());
-            return 0;
         case WM_LBUTTONUP:
-            if (rt::g_mouseCapture) {
-                rt::g_mouseCapture = false;
-                ReleaseCapture();
-            }
-            return 0;
         case WM_MOUSEMOVE:
-            if (rt::g_mouseCapture) {
-                POINT currentPos;
-                GetCursorPos(&currentPos);
-                
-                // Calculate delta
-                int deltaX = currentPos.x - rt::g_lastMousePos.x;
-                int deltaY = currentPos.y - rt::g_lastMousePos.y;
-                
-                // Update yaw and pitch (with sensitivity)
-                const float sensitivity = 0.002f;
-                rt::g_headYaw -= deltaX * sensitivity;
-                rt::g_headPitch -= deltaY * sensitivity;  // Inverted for natural feel
-                
-                // Clamp pitch to avoid gimbal lock
-                const float maxPitch = 1.5f;  // ~85 degrees
-                if (rt::g_headPitch > maxPitch) rt::g_headPitch = maxPitch;
-                if (rt::g_headPitch < -maxPitch) rt::g_headPitch = -maxPitch;
-                
-                // Reset cursor to center of window to avoid hitting screen edges
-                RECT rect;
-                GetWindowRect(hWnd, &rect);
-                int centerX = (rect.left + rect.right) / 2;
-                int centerY = (rect.top + rect.bottom) / 2;
-                SetCursorPos(centerX, centerY);
-                rt::g_lastMousePos.x = centerX;
-                rt::g_lastMousePos.y = centerY;
-            }
             return 0;
         default:
             break;
@@ -2565,8 +2522,6 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
         lastPosFrame = 0;
     }
 
-    rt::g_headPos = HMDPos;
-
     float deltaTime = (float)periodSec;
 
     rt::g_rightController.triggerPressed = RTrigger;
@@ -2612,14 +2567,10 @@ static XrResult XRAPI_PTR xrWaitFrame_runtime(XrSession, const XrFrameWaitInfo*,
         rt::g_leftController.linearVelocity.z = (leftPose.position.z - rt::g_leftController.prevPosWorld.z) / deltaTime;
 
         // Angular velocity from yaw/pitch delta
-        //float totalRightYaw = rt::g_headYaw + rt::g_rightController.yawOffset;
-        //float totalRightPitch = rt::g_headPitch + rt::g_rightController.pitchOffset;
         rt::g_rightController.angularVelocity.x = (rt::g_rightController.pitchOffset - rt::g_rightController.prevPitch) / deltaTime;
         rt::g_rightController.angularVelocity.y = (rt::g_rightController.yawOffset - rt::g_rightController.prevYaw) / deltaTime;
         rt::g_rightController.angularVelocity.z = (rt::g_rightController.rollOffset - rt::g_rightController.prevRoll) / deltaTime;
 
-        //float totalLeftYaw = rt::g_headYaw + rt::g_leftController.yawOffset;
-        //float totalLeftPitch = rt::g_headPitch + rt::g_leftController.pitchOffset;
         rt::g_leftController.angularVelocity.x = (rt::g_leftController.pitchOffset - rt::g_leftController.prevPitch) / deltaTime;
         rt::g_leftController.angularVelocity.y = (rt::g_leftController.yawOffset - rt::g_leftController.prevYaw) / deltaTime;
         rt::g_leftController.angularVelocity.z = (rt::g_leftController.rollOffset - rt::g_leftController.prevRoll) / deltaTime;
@@ -4315,9 +4266,9 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
         XrVector3f rotatedOffset = rotateVector(orientation, localEyeOffset);
         
         views[i].pose.position = {
-            rt::g_headPos.x + rotatedOffset.x,
-            rt::g_headPos.y + rotatedOffset.y + (stageSpace ? rt::g_headPos.w : 0.0f),
-            rt::g_headPos.z + rotatedOffset.z
+            HMDPos.x + rotatedOffset.x,
+            HMDPos.y + rotatedOffset.y + (stageSpace ? HMDPos.w : 0.0f),
+            HMDPos.z + rotatedOffset.z
         };
         views[i].pose.orientation = orientation;
         
@@ -4325,12 +4276,6 @@ static XrResult XRAPI_PTR xrLocateViews_runtime(XrSession, const XrViewLocateInf
         float fovX = FOVH / 2.0f;
         float fovY = FOVV / 2.0f;
         views[i].fov = { -fovX, fovX, fovY, -fovY };
-    }
-    static int locateCount = 0;
-    if (++locateCount % 90 == 1 && verboseLogging) {  // Log every 90 frames (~1 second)
-        Logf("[SimXR] xrLocateViews: pos=(%.2f,%.2f,%.2f) yaw=%.2f pitch=%.2f", 
-             rt::g_headPos.x, rt::g_headPos.y, rt::g_headPos.z, 
-             rt::g_headYaw, rt::g_headPitch);
     }
     return XR_SUCCESS;
 }
@@ -4418,9 +4363,9 @@ static XrResult XRAPI_PTR xrLocateSpace_runtime(XrSpace space, XrSpace baseSpace
         location->locationFlags = XR_SPACE_LOCATION_POSITION_VALID_BIT | XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
         location->pose.orientation = { HMDQuat.x, HMDQuat.y, HMDQuat.z, HMDQuat.w };
         location->pose.position = {
-            rt::g_headPos.x,
-            rt::g_headPos.y + (stageSpace ? rt::g_headPos.w : 0.0f),
-            rt::g_headPos.z
+            HMDPos.x,
+            HMDPos.y + (stageSpace ? HMDPos.w : 0.0f),
+            HMDPos.z
         };
     }
     return XR_SUCCESS;
