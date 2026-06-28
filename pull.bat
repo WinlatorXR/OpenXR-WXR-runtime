@@ -1,1 +1,1 @@
-adb pull /sdcard/Download/oxrwxr
+adb pull /sdcard/Download/Winlator/oxrwxr

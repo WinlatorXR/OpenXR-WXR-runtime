@@ -1,6 +1,6 @@
 {
     "file_format_version": "1.0.0",
     "runtime": {
-        "library_path": "D:/oxrwxr/openxr_wxr.dll"
+        "library_path": "D:/Winlator/oxrwxr/openxr_wxr.dll"
     }
 }
